@@ -1,0 +1,10 @@
+[project]
+name = "bid-agent"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[tool.vercel]
+entrypoint = "bid_agent.wsgi:application"
+
+[tool.vercel.scripts]
+build = "python build.py"

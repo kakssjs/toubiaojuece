@@ -132,6 +132,50 @@ class TenderDocument(models.Model):
         return self.original_name
 
 
+class TenderReference(models.Model):
+    title = models.CharField('参考标书名称', max_length=220)
+    project_type = models.CharField('项目类型', max_length=120, blank=True)
+    industry = models.CharField('所属行业', max_length=120, blank=True)
+    region = models.CharField('适用地区', max_length=120, blank=True)
+    issuing_organization = models.CharField('招标单位', max_length=180, blank=True)
+    budget_amount = models.DecimalField('预算金额', max_digits=14, decimal_places=2, null=True, blank=True)
+    published_at = models.DateField('发布日期', null=True, blank=True)
+    summary = models.TextField('内容摘要', blank=True)
+    reference_points = models.TextField('参考要点', blank=True)
+    source_text = models.TextField('标书正文', blank=True)
+    tags = models.CharField('标签', max_length=255, blank=True)
+    is_featured = models.BooleanField('重点参考', default=True)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        verbose_name = '参考标书'
+        verbose_name_plural = '参考标书'
+        ordering = ['-is_featured', '-published_at', '-updated_at']
+
+    def __str__(self):
+        return self.title
+
+
+class Contract(models.Model):
+    basic_info = models.TextField('基础信息', blank=True)
+    tender_content = models.TextField('标书内容', blank=True)
+    reference_points = models.TextField('参考要点', blank=True)
+    scoring_rules = models.TextField('评分规则', blank=True)
+    risk_tags = models.TextField('风险标签', blank=True)
+    material_checklist = models.TextField('材料清单', blank=True)
+    source_maintenance_info = models.TextField('来源与维护信息', blank=True)
+
+    class Meta:
+        db_table = 'contract'
+        verbose_name = '合同参考'
+        verbose_name_plural = '合同参考'
+        ordering = ['-id']
+
+    def __str__(self):
+        return f'Contract #{self.id}'
+
+
 class ProjectNote(models.Model):
     class NoteType(models.TextChoices):
         FOLLOW_UP = 'follow_up', '跟进记录'

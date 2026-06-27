@@ -6,10 +6,20 @@ from pathlib import Path
 from django.conf import settings
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_http_methods, require_POST
 
 from .agents import TenderAnalysisAgent
-from .models import AnalysisReport, CompanyProfile, ProjectExperience, ProjectNote, Qualification, TenderDocument, TenderProject
+from .models import (
+    AnalysisReport,
+    CompanyProfile,
+    Contract,
+    ProjectExperience,
+    ProjectNote,
+    Qualification,
+    TenderDocument,
+    TenderProject,
+    TenderReference,
+)
 from .services.pdf_parser import extract_pdf_text
 from .services.report_qa import answer_report_question
 from .services.report_exporter import build_report_docx, build_report_pdf
@@ -184,6 +194,115 @@ def recent_projects(request):
         {
             'ok': True,
             'projects': rows,
+        },
+        json_dumps_params={'ensure_ascii': False},
+    )
+
+
+def list_reference_tenders(request):
+    references = TenderReference.objects.all()
+    project_type = str(request.GET.get('project_type') or '').strip()
+    industry = str(request.GET.get('industry') or '').strip()
+    region = str(request.GET.get('region') or '').strip()
+
+    if project_type:
+        references = references.filter(project_type=project_type)
+    if industry:
+        references = references.filter(industry=industry)
+    if region:
+        references = references.filter(region=region)
+
+    rows = [_serialize_reference_tender(item) for item in references]
+
+    if _prefers_html(request):
+        return HttpResponse(_reference_tenders_html(rows), content_type='text/html; charset=utf-8')
+
+    return utf8_json(
+        {
+            'ok': True,
+            'references': rows,
+        },
+        json_dumps_params={'ensure_ascii': False},
+    )
+
+
+def contracts_page(request):
+    contracts = [_serialize_contract(item) for item in Contract.objects.all()]
+    return HttpResponse(_contracts_page_html(contracts), content_type='text/html; charset=utf-8')
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'POST'])
+def contracts_collection(request):
+    if request.method == 'GET':
+        contracts = [_serialize_contract(item) for item in Contract.objects.all()]
+        if _prefers_html(request):
+            return HttpResponse(_contracts_page_html(contracts), content_type='text/html; charset=utf-8')
+        return utf8_json(
+            {
+                'ok': True,
+                'contracts': contracts,
+            },
+            json_dumps_params={'ensure_ascii': False},
+        )
+
+    payload = _load_json_payload(request)
+    if isinstance(payload, JsonResponse):
+        return payload
+
+    fields = _contract_fields_from_payload(payload)
+    validation_error = _validate_contract_fields(fields)
+    if validation_error:
+        return validation_error
+
+    contract = Contract.objects.create(**fields)
+    return utf8_json(
+        {
+            'ok': True,
+            'contract': _serialize_contract(contract),
+        },
+        status=201,
+        json_dumps_params={'ensure_ascii': False},
+    )
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'PUT', 'DELETE'])
+def contract_detail_api(request, contract_id):
+    try:
+        contract = Contract.objects.get(id=contract_id)
+    except Contract.DoesNotExist:
+        return utf8_json({'ok': False, 'error': '合同记录不存在。'}, status=404)
+
+    if request.method == 'GET':
+        return utf8_json(
+            {
+                'ok': True,
+                'contract': _serialize_contract(contract),
+            },
+            json_dumps_params={'ensure_ascii': False},
+        )
+
+    if request.method == 'DELETE':
+        contract.delete()
+        return utf8_json({'ok': True}, json_dumps_params={'ensure_ascii': False})
+
+    payload = _load_json_payload(request)
+    if isinstance(payload, JsonResponse):
+        return payload
+
+    fields = _contract_fields_from_payload(payload)
+    validation_error = _validate_contract_fields(fields)
+    if validation_error:
+        return validation_error
+
+    for field, value in fields.items():
+        setattr(contract, field, value)
+    contract.save()
+    return utf8_json(
+        {
+            'ok': True,
+            'contract': _serialize_contract(contract),
         },
         json_dumps_params={'ensure_ascii': False},
     )
@@ -619,6 +738,327 @@ def _recent_projects_html(projects):
 </html>'''
 
 
+def _reference_tenders_html(references):
+    rows = []
+    for item in references:
+        tags = ' / '.join(item.get('tags') or []) or '-'
+        source_text = escape(item.get('source_text') or '-').replace('\n', '<br>')
+        rows.append(
+            '<article class="reference-card">'
+            f'<div class="reference-card__top"><h2>{escape(item.get("title") or "-")}</h2><span>{escape(item.get("project_type") or "-")}</span></div>'
+            f'<p class="reference-card__meta">{escape(item.get("industry") or "-")} · {escape(item.get("region") or "-")} · {escape(item.get("issuing_organization") or "-")}</p>'
+            f'<p><strong>摘要：</strong>{escape(item.get("summary") or "-")}</p>'
+            f'<p><strong>参考要点：</strong>{escape(item.get("reference_points") or "-")}</p>'
+            f'<p><strong>标签：</strong>{escape(tags)}</p>'
+            f'<div class="reference-card__text"><strong>正文片段：</strong><div>{source_text}</div></div>'
+            '</article>'
+        )
+
+    body = ''.join(rows) or '<p class="empty">暂无参考标书。</p>'
+    return f'''<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>参考标书库</title>
+  <style>
+    body {{ margin: 0; padding: 32px; background: #f3f4f7; color: #1b2330; font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif; }}
+    h1 {{ margin: 0 0 8px; font-size: 28px; }}
+    p.lead {{ margin: 0 0 24px; color: #5b6472; }}
+    .reference-grid {{ display: grid; gap: 16px; }}
+    .reference-card {{ background: #fff; border: 1px solid #dbe0e8; border-radius: 8px; padding: 18px 20px; box-shadow: 0 8px 24px rgba(18, 23, 34, 0.05); }}
+    .reference-card__top {{ display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }}
+    .reference-card__top h2 {{ margin: 0; font-size: 20px; }}
+    .reference-card__top span {{ color: #8a6230; font-weight: 700; }}
+    .reference-card__meta {{ color: #5b6472; }}
+    .reference-card p {{ margin: 10px 0; line-height: 1.7; }}
+    .reference-card__text {{ margin-top: 14px; padding-top: 14px; border-top: 1px solid #edf0f4; line-height: 1.7; }}
+    .empty {{ padding: 24px; background: #fff; border: 1px solid #dbe0e8; border-radius: 8px; }}
+  </style>
+</head>
+<body>
+  <h1>参考标书库</h1>
+  <p class="lead">浏览器中查看时展示可读预览；程序调用请继续使用 JSON 接口。</p>
+  <section class="reference-grid">{body}</section>
+</body>
+</html>'''
+
+
+def _contracts_page_html(contracts):
+    cards = []
+    for item in contracts:
+        cards.append(
+            '<button class="contract-item" type="button"'
+            f' data-contract=\'{escape(json.dumps(item, ensure_ascii=False))}\'>'
+            f'<strong>{escape(_contract_title(item))}</strong>'
+            f'<span>{escape(_contract_subtitle(item))}</span>'
+            '</button>'
+        )
+
+    list_html = ''.join(cards) or '<div class="empty">当前还没有合同样本。</div>'
+    initial_payload = json.dumps(contracts, ensure_ascii=False).replace('</', '<\\/')
+    return f'''<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>合同库</title>
+  <style>
+    :root {{ color-scheme: light; }}
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; background: #eef1f6; color: #16202f; font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif; }}
+    .shell {{ width: min(1320px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 42px; }}
+    .topbar {{ display: flex; justify-content: space-between; gap: 16px; align-items: end; margin-bottom: 20px; }}
+    h1 {{ margin: 0; font-size: 30px; }}
+    .lead {{ margin: 8px 0 0; color: #5a6678; line-height: 1.7; }}
+    .back-link {{ color: #9a7335; font-weight: 700; }}
+    .layout {{ display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 18px; align-items: start; }}
+    .panel {{ background: rgba(255,255,255,0.92); border: 1px solid #d9e0ea; border-radius: 12px; box-shadow: 0 14px 30px rgba(18,23,34,0.06); }}
+    .list-panel {{ padding: 14px; position: sticky; top: 18px; }}
+    .form-panel {{ padding: 20px; }}
+    .list-head {{ display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 12px; }}
+    .list-head strong {{ font-size: 16px; }}
+    .list {{ display: grid; gap: 10px; max-height: calc(100vh - 180px); overflow: auto; }}
+    .contract-item {{ width: 100%; text-align: left; padding: 14px; border: 1px solid #d8dee8; border-radius: 10px; background: #fff; cursor: pointer; }}
+    .contract-item.active {{ border-color: #b08a43; box-shadow: 0 0 0 2px rgba(176,138,67,0.14); }}
+    .contract-item strong, .contract-item span {{ display: block; }}
+    .contract-item strong {{ font-size: 14px; line-height: 1.5; }}
+    .contract-item span {{ margin-top: 6px; color: #697385; font-size: 12px; line-height: 1.5; }}
+    .empty {{ padding: 16px; border: 1px dashed #ccd4df; border-radius: 10px; color: #697385; background: #fafbfd; }}
+    .toolbar {{ display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }}
+    .button-primary, .button-secondary, .button-danger {{ min-height: 42px; border-radius: 8px; padding: 0 16px; font-size: 14px; font-weight: 700; cursor: pointer; }}
+    .button-primary {{ border: 0; color: #fff; background: #111722; }}
+    .button-secondary {{ border: 1px solid #cfd6e0; background: #fff; color: #1a2230; }}
+    .button-danger {{ border: 1px solid #e0c2c2; background: #fff7f7; color: #a23d3d; }}
+    .status {{ min-height: 24px; margin-bottom: 12px; color: #5a6678; }}
+    .status.error {{ color: #b13e3e; }}
+    .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }}
+    .field {{ display: grid; gap: 8px; }}
+    .field.full {{ grid-column: 1 / -1; }}
+    label {{ font-size: 13px; font-weight: 700; color: #364152; }}
+    input, textarea {{ width: 100%; border: 1px solid #cfd6e0; border-radius: 8px; padding: 12px 13px; font: inherit; color: inherit; background: #fff; }}
+    textarea {{ min-height: 120px; resize: vertical; line-height: 1.7; }}
+    .meta {{ margin-top: 16px; color: #6d7685; font-size: 12px; }}
+    @media (max-width: 980px) {{
+      .layout {{ grid-template-columns: 1fr; }}
+      .list-panel {{ position: static; }}
+      .grid {{ grid-template-columns: 1fr; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="topbar">
+      <div>
+        <h1>合同库</h1>
+        <p class="lead">管理合同/标书参考资料，支持新增、编辑、删除，并沉淀风险、评分规则与材料清单。</p>
+      </div>
+      <a class="back-link" href="/">返回首页</a>
+    </div>
+    <div class="layout">
+      <aside class="panel list-panel">
+        <div class="list-head">
+          <strong>样本列表</strong>
+          <button class="button-secondary" id="newContract" type="button">新建</button>
+        </div>
+        <div class="list" id="contractList">{list_html}</div>
+      </aside>
+      <section class="panel form-panel">
+        <div class="toolbar">
+          <button class="button-primary" id="saveButton" type="button">保存</button>
+          <button class="button-secondary" id="resetButton" type="button">重置</button>
+          <button class="button-danger" id="deleteButton" type="button">删除</button>
+        </div>
+        <div class="status" id="statusText">已加载 {len(contracts)} 条合同样本。</div>
+        <div class="grid">
+          <div class="field full">
+            <label for="basic_info">基础信息</label>
+            <textarea id="basic_info"></textarea>
+          </div>
+          <div class="field full">
+            <label for="tender_content">标书内容</label>
+            <textarea id="tender_content"></textarea>
+          </div>
+          <div class="field full">
+            <label for="reference_points">参考要点</label>
+            <textarea id="reference_points"></textarea>
+          </div>
+          <div class="field full">
+            <label for="scoring_rules">评分规则</label>
+            <textarea id="scoring_rules"></textarea>
+          </div>
+          <div class="field">
+            <label for="risk_tags">风险标签</label>
+            <textarea id="risk_tags"></textarea>
+          </div>
+          <div class="field">
+            <label for="material_checklist">材料清单</label>
+            <textarea id="material_checklist"></textarea>
+          </div>
+          <div class="field full">
+            <label for="source_maintenance_info">来源与维护信息</label>
+            <textarea id="source_maintenance_info"></textarea>
+          </div>
+        </div>
+        <div class="meta" id="metaText">当前为新建模式。</div>
+      </section>
+    </div>
+  </div>
+  <script id="initial-contracts" type="application/json">{initial_payload}</script>
+  <script>
+    const initialContracts = JSON.parse(document.getElementById('initial-contracts').textContent);
+    const fields = [
+      'basic_info',
+      'tender_content',
+      'reference_points',
+      'scoring_rules',
+      'risk_tags',
+      'material_checklist',
+      'source_maintenance_info',
+    ];
+    const formEls = Object.fromEntries(fields.map((name) => [name, document.getElementById(name)]));
+    const listEl = document.getElementById('contractList');
+    const statusEl = document.getElementById('statusText');
+    const metaEl = document.getElementById('metaText');
+    let contracts = initialContracts;
+    let currentId = null;
+
+    function emptyContract() {{
+      return Object.fromEntries(fields.map((name) => [name, '']));
+    }}
+
+    function contractTitle(item) {{
+      return (item.basic_info || '未命名合同').split('\\n')[0].trim() || '未命名合同';
+    }}
+
+    function contractSubtitle(item) {{
+      const parts = [];
+      if (item.risk_tags) parts.push(item.risk_tags.split('\\n')[0].trim());
+      if (item.source_maintenance_info) parts.push(item.source_maintenance_info.split('\\n')[0].trim());
+      return parts.filter(Boolean).join(' · ') || '点击查看详情';
+    }}
+
+    function renderList() {{
+      if (!contracts.length) {{
+        listEl.innerHTML = '<div class="empty">当前还没有合同样本。</div>';
+        return;
+      }}
+      listEl.innerHTML = contracts.map((item) => `
+        <button class="contract-item ${'{'}item.id === currentId ? 'active' : ''{'}'}" type="button" data-id="${'{'}item.id{'}'}">
+          <strong>${'{'}escapeHtml(contractTitle(item)){'}'}</strong>
+          <span>${'{'}escapeHtml(contractSubtitle(item)){'}'}</span>
+        </button>
+      `).join('');
+    }}
+
+    function fillForm(contract) {{
+      const source = contract || emptyContract();
+      fields.forEach((name) => {{
+        formEls[name].value = source[name] || '';
+      }});
+      currentId = contract ? contract.id : null;
+      metaEl.textContent = currentId ? `当前编辑 ID: ${'{'}currentId{'}'}` : '当前为新建模式。';
+      renderList();
+    }}
+
+    function getPayload() {{
+      const payload = {{}};
+      fields.forEach((name) => {{
+        payload[name] = formEls[name].value.trim();
+      }});
+      return payload;
+    }}
+
+    function setStatus(message, isError = false) {{
+      statusEl.textContent = message;
+      statusEl.className = isError ? 'status error' : 'status';
+    }}
+
+    function escapeHtml(value) {{
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }}
+
+    async function reloadContracts(selectId = currentId) {{
+      const response = await fetch('/api/contracts/');
+      const payload = await response.json();
+      contracts = payload.contracts || [];
+      if (selectId) {{
+        const current = contracts.find((item) => item.id === selectId);
+        if (current) {{
+          fillForm(current);
+          return;
+        }}
+      }}
+      fillForm(contracts[0] || null);
+    }}
+
+    listEl.addEventListener('click', (event) => {{
+      const trigger = event.target.closest('.contract-item');
+      if (!trigger) return;
+      const id = Number(trigger.dataset.id);
+      const target = contracts.find((item) => item.id === id);
+      fillForm(target || null);
+      setStatus(`已切换到合同 ${'{'}id{'}'}。`);
+    }});
+
+    document.getElementById('newContract').addEventListener('click', () => {{
+      fillForm(null);
+      setStatus('已切换到新建模式。');
+    }});
+
+    document.getElementById('resetButton').addEventListener('click', () => {{
+      const current = contracts.find((item) => item.id === currentId);
+      fillForm(current || null);
+      setStatus('表单已重置。');
+    }});
+
+    document.getElementById('saveButton').addEventListener('click', async () => {{
+      const payload = getPayload();
+      const method = currentId ? 'PUT' : 'POST';
+      const url = currentId ? `/api/contracts/${'{'}currentId{'}'}/` : '/api/contracts/';
+      const response = await fetch(url, {{
+        method,
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify(payload),
+      }});
+      const result = await response.json();
+      if (!response.ok || !result.ok) {{
+        setStatus(result.error || '保存失败。', true);
+        return;
+      }}
+      const saved = result.contract;
+      setStatus(currentId ? `合同 ${'{'}saved.id{'}'} 已更新。` : `合同 ${'{'}saved.id{'}'} 已创建。`);
+      await reloadContracts(saved.id);
+    }});
+
+    document.getElementById('deleteButton').addEventListener('click', async () => {{
+      if (!currentId) {{
+        setStatus('当前是新建模式，没有可删除的记录。', true);
+        return;
+      }}
+      if (!window.confirm(`确认删除合同 ${'{'}currentId{'}'} 吗？`)) return;
+      const response = await fetch(`/api/contracts/${'{'}currentId{'}'}/`, {{ method: 'DELETE' }});
+      const result = await response.json();
+      if (!response.ok || !result.ok) {{
+        setStatus(result.error || '删除失败。', true);
+        return;
+      }}
+      setStatus(`合同 ${'{'}currentId{'}'} 已删除。`);
+      currentId = null;
+      await reloadContracts();
+    }});
+
+    fillForm(contracts[0] || null);
+  </script>
+</body>
+</html>'''
+
+
 def _serialize_project_report(report):
     if report is None:
         return None
@@ -642,6 +1082,79 @@ def _serialize_project_note(note):
         'operator_name': note.operator_name,
         'created_at': note.created_at.isoformat(),
     }
+
+
+def _serialize_reference_tender(item):
+    return {
+        'id': item.id,
+        'title': item.title,
+        'project_type': item.project_type,
+        'industry': item.industry,
+        'region': item.region,
+        'issuing_organization': item.issuing_organization,
+        'budget_amount': float(item.budget_amount) if item.budget_amount is not None else None,
+        'published_at': item.published_at.isoformat() if item.published_at else '',
+        'summary': item.summary,
+        'reference_points': item.reference_points,
+        'source_text': item.source_text,
+        'tags': _split_profile_text(item.tags),
+        'is_featured': item.is_featured,
+        'updated_at': item.updated_at.isoformat(),
+    }
+
+
+def _serialize_contract(item):
+    return {
+        'id': item.id,
+        'basic_info': item.basic_info,
+        'tender_content': item.tender_content,
+        'reference_points': item.reference_points,
+        'scoring_rules': item.scoring_rules,
+        'risk_tags': item.risk_tags,
+        'material_checklist': item.material_checklist,
+        'source_maintenance_info': item.source_maintenance_info,
+    }
+
+
+def _contract_title(item):
+    first_line = str(item.get('basic_info') or '').split('\n')[0].strip()
+    return first_line or '未命名合同'
+
+
+def _contract_subtitle(item):
+    parts = []
+    risk = str(item.get('risk_tags') or '').split('\n')[0].strip()
+    source = str(item.get('source_maintenance_info') or '').split('\n')[0].strip()
+    if risk:
+        parts.append(risk)
+    if source:
+        parts.append(source)
+    return ' · '.join(parts) or '点击查看详情'
+
+
+def _load_json_payload(request):
+    try:
+        return json.loads(request.body.decode('utf-8') or '{}')
+    except json.JSONDecodeError:
+        return utf8_json({'ok': False, 'error': '请求体必须是有效的 JSON。'}, status=400)
+
+
+def _contract_fields_from_payload(payload):
+    return {
+        'basic_info': str(payload.get('basic_info') or '').strip(),
+        'tender_content': str(payload.get('tender_content') or '').strip(),
+        'reference_points': str(payload.get('reference_points') or '').strip(),
+        'scoring_rules': str(payload.get('scoring_rules') or '').strip(),
+        'risk_tags': str(payload.get('risk_tags') or '').strip(),
+        'material_checklist': str(payload.get('material_checklist') or '').strip(),
+        'source_maintenance_info': str(payload.get('source_maintenance_info') or '').strip(),
+    }
+
+
+def _validate_contract_fields(fields):
+    if not any(fields.values()):
+        return utf8_json({'ok': False, 'error': '请至少填写一项合同/标书内容。'}, status=400)
+    return None
 
 
 def _project_risk_level(project):

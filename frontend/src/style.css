@@ -41,6 +41,291 @@ a {
     linear-gradient(180deg, #ffffff 0%, #f7f8fa 48%, #eef1f5 100%);
 }
 
+.workspace-page {
+  width: min(1380px, calc(100% - 40px));
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 24px 0;
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  gap: 20px;
+}
+
+.workspace-sidebar {
+  position: sticky;
+  top: 24px;
+  height: calc(100vh - 48px);
+  display: grid;
+  align-content: start;
+  gap: 22px;
+  padding: 24px 20px;
+  border: 1px solid rgba(24, 29, 40, 0.08);
+  border-radius: 18px;
+  color: #f5f7fa;
+  background:
+    linear-gradient(180deg, rgba(24, 31, 44, 0.96), rgba(17, 23, 34, 0.98)),
+    #111722;
+  box-shadow: 0 24px 48px rgba(17, 23, 34, 0.22);
+}
+
+.workspace-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.workspace-brand-mark {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  color: #111722;
+  background: #d7bd79;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.workspace-brand strong,
+.workspace-company-card strong {
+  display: block;
+}
+
+.workspace-brand span:last-child,
+.workspace-company-card p {
+  color: rgba(238, 243, 248, 0.72);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.workspace-nav {
+  display: grid;
+  gap: 8px;
+}
+
+.workspace-nav a {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  border-radius: 10px;
+  color: rgba(238, 243, 248, 0.82);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.workspace-nav a.active {
+  color: #d7bd79;
+  background: rgba(215, 189, 121, 0.12);
+}
+
+.workspace-company-card {
+  margin-top: auto;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.workspace-company-label {
+  display: block;
+  margin-bottom: 8px;
+  color: #d7bd79;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.workspace-main {
+  display: grid;
+  gap: 18px;
+  align-content: start;
+}
+
+.workspace-hero,
+.workspace-panel,
+.workspace-metric-card {
+  border: 1px solid rgba(24, 29, 40, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 18px 42px rgba(17, 23, 34, 0.06);
+}
+
+.workspace-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px;
+  align-items: end;
+  padding: 28px;
+}
+
+.workspace-hero h1 {
+  margin: 0;
+  color: #0f1521;
+  font-size: clamp(34px, 4.2vw, 52px);
+  line-height: 1.05;
+}
+
+.workspace-hero p:last-child,
+.workspace-rail-copy {
+  margin: 10px 0 0;
+  color: #5d6675;
+  font-size: 15px;
+  line-height: 1.76;
+}
+
+.workspace-hero-actions,
+.workspace-rail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.workspace-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.workspace-metric-card {
+  display: grid;
+  gap: 10px;
+  padding: 22px;
+}
+
+.workspace-metric-card span {
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.workspace-metric-card strong {
+  color: #111722;
+  font-size: 36px;
+  line-height: 1;
+}
+
+.workspace-metric-card small {
+  color: #5d6675;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.workspace-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.72fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.workspace-panel {
+  padding: 22px;
+}
+
+.workspace-panel-compact {
+  padding: 20px;
+}
+
+.workspace-panel-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.workspace-panel-head.compact {
+  margin-bottom: 12px;
+}
+
+.workspace-panel-head h2 {
+  margin: 0;
+  color: #111722;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.workspace-opportunity-list,
+.workspace-reminders,
+.workspace-rail {
+  display: grid;
+  gap: 12px;
+}
+
+.workspace-opportunity-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px 72px 72px 76px;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid rgba(24, 29, 40, 0.08);
+  border-radius: 14px;
+  background: rgba(248, 249, 251, 0.88);
+}
+
+.workspace-opportunity-row strong {
+  display: block;
+  color: #151922;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.workspace-opportunity-row span {
+  color: #70798a;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.workspace-reminder {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(248, 249, 251, 0.88);
+}
+
+.workspace-reminder strong {
+  display: block;
+  color: #151922;
+  font-size: 14px;
+}
+
+.workspace-reminder p {
+  margin: 8px 0 0;
+  color: #5d6675;
+  font-size: 13px;
+  line-height: 1.68;
+}
+
+.workspace-reminder-high {
+  border: 1px solid rgba(244, 63, 94, 0.22);
+  background: rgba(244, 63, 94, 0.06);
+}
+
+.workspace-reminder-medium {
+  border: 1px solid rgba(176, 138, 67, 0.22);
+  background: rgba(176, 138, 67, 0.08);
+}
+
+.workspace-empty {
+  padding: 18px;
+  border-radius: 14px;
+  color: #5d6675;
+  background: rgba(248, 249, 251, 0.9);
+  font-size: 14px;
+  line-height: 1.72;
+}
+
+.loading-panel-error {
+  border-color: rgba(244, 63, 94, 0.12);
+  background: rgba(255, 248, 249, 0.9);
+}
+
+.loading-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
 .site-header {
   position: sticky;
   top: 0;
@@ -2203,8 +2488,30 @@ a {
 }
 
 @media (max-width: 980px) {
+  .workspace-page,
   .site-header {
     height: auto;
+  }
+
+  .workspace-page {
+    width: min(100% - 28px, 1380px);
+    grid-template-columns: 1fr;
+    padding: 18px 0 28px;
+  }
+
+  .workspace-sidebar {
+    position: static;
+    height: auto;
+    margin-bottom: 4px;
+  }
+
+  .workspace-hero,
+  .workspace-content,
+  .workspace-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .site-header {
     padding: 18px 0;
     align-items: flex-start;
     flex-direction: column;
@@ -2288,10 +2595,31 @@ a {
 }
 
 @media (max-width: 640px) {
+  .workspace-hero,
+  .workspace-panel,
+  .workspace-metric-card,
   .site-header,
   .page-section,
   .closing-section {
     width: min(100% - 28px, 1180px);
+  }
+
+  .workspace-hero-actions,
+  .workspace-rail-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .workspace-hero-actions .button-primary,
+  .workspace-hero-actions .button-secondary,
+  .workspace-rail-actions .button-primary,
+  .workspace-rail-actions .button-secondary {
+    width: 100%;
+  }
+
+  .workspace-opportunity-row {
+    grid-template-columns: 1fr;
+    align-items: start;
   }
 
   .hero-copy h1 {

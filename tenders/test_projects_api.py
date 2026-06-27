@@ -1,7 +1,8 @@
-from django.test import TestCase
 import json
 
-from tenders.models import AnalysisReport, CompanyProfile, TenderProject
+from django.test import TestCase
+
+from tenders.models import AnalysisReport, CompanyProfile, TenderProject, TenderReference
 
 
 class ProjectDashboardApiTests(TestCase):
@@ -257,3 +258,39 @@ class ProjectDashboardApiTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["ok"], False)
+
+
+class TenderReferenceApiTests(TestCase):
+    def test_reference_tenders_api_returns_seedable_reference_rows(self):
+        TenderReference.objects.create(
+            title="电子政务云平台扩容项目参考标书",
+            project_type="云平台建设",
+            industry="政务信息化",
+            region="上海",
+            issuing_organization="某市大数据中心",
+            summary="适合参考评分办法和运维服务要求。",
+            reference_points="重点关注等级保护、运维SLA、验收阶段。",
+            source_text="第一章 招标公告\n第二章 投标须知",
+            tags="云平台、政务、运维",
+            is_featured=True,
+        )
+
+        response = self.client.get("/api/reference-tenders/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["ok"], True)
+        references_by_title = {item["title"]: item for item in payload["references"]}
+        self.assertIn("电子政务云平台扩容项目参考标书", references_by_title)
+        self.assertEqual(references_by_title["电子政务云平台扩容项目参考标书"]["tags"], ["云平台", "政务", "运维"])
+
+    def test_reference_tenders_api_can_filter_by_project_type(self):
+        TenderReference.objects.create(title="A", project_type="软件信息化")
+        TenderReference.objects.create(title="B", project_type="弱电集成")
+
+        response = self.client.get("/api/reference-tenders/?project_type=软件信息化")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("A", [item["title"] for item in payload["references"]])
+        self.assertNotIn("B", [item["title"] for item in payload["references"]])

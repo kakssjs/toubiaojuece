@@ -1,6 +1,16 @@
 from django.contrib import admin
 
-from .models import AnalysisReport, CompanyProfile, ProjectExperience, ProjectNote, Qualification, TenderDocument, TenderProject
+from .models import (
+    AnalysisReport,
+    CompanyProfile,
+    Contract,
+    ProjectExperience,
+    ProjectNote,
+    Qualification,
+    TenderDocument,
+    TenderProject,
+    TenderReference,
+)
 
 
 class QualificationInline(admin.TabularInline):
@@ -53,6 +63,33 @@ class TenderDocumentAdmin(admin.ModelAdmin):
     readonly_fields = ('created_at', 'updated_at')
 
 
+@admin.register(TenderReference)
+class TenderReferenceAdmin(admin.ModelAdmin):
+    list_display = ('title', 'project_type', 'industry', 'region', 'issuing_organization', 'published_at', 'is_featured')
+    search_fields = ('title', 'project_type', 'industry', 'region', 'issuing_organization', 'tags', 'summary', 'source_text')
+    list_filter = ('is_featured', 'project_type', 'industry', 'region', 'published_at')
+    readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(Contract)
+class ContractAdmin(admin.ModelAdmin):
+    list_display = ('id', 'basic_info_preview', 'risk_tags_preview', 'source_maintenance_preview')
+    search_fields = ('basic_info', 'tender_content', 'reference_points', 'scoring_rules', 'risk_tags', 'material_checklist', 'source_maintenance_info')
+    list_per_page = 20
+
+    @admin.display(description='基础信息')
+    def basic_info_preview(self, obj):
+        return _preview_text(obj.basic_info)
+
+    @admin.display(description='风险标签')
+    def risk_tags_preview(self, obj):
+        return _preview_text(obj.risk_tags)
+
+    @admin.display(description='来源与维护信息')
+    def source_maintenance_preview(self, obj):
+        return _preview_text(obj.source_maintenance_info)
+
+
 @admin.register(ProjectNote)
 class ProjectNoteAdmin(admin.ModelAdmin):
     list_display = ('tender_project', 'note_type', 'operator_name', 'created_at')
@@ -67,3 +104,10 @@ class AnalysisReportAdmin(admin.ModelAdmin):
     search_fields = ('tender_project__name', 'summary')
     list_filter = ('decision', 'created_at')
     readonly_fields = ('created_at', 'updated_at')
+
+
+def _preview_text(value, length=48):
+    text = ' '.join(str(value or '').split())
+    if len(text) <= length:
+        return text or '-'
+    return f'{text[:length]}...'

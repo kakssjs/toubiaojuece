@@ -1,6 +1,6 @@
-<template>
+﻿<template>
   <main class="site-shell">
-    <header class="site-header">
+    <header v-if="currentPage !== 'home'" class="site-header">
       <a class="brand" href="/" aria-label="策标首页">
         <span class="brand-symbol brand-logo" aria-hidden="true">
           <svg viewBox="0 0 48 48" role="img" focusable="false">
@@ -24,112 +24,37 @@
       </nav>
     </header>
 
-    <section v-if="currentPage === 'home'" class="page-section hero-section">
-      <div class="hero-copy">
-        <p class="section-kicker">Enterprise Tender Intelligence</p>
-        <h1>AI招投标智能决策平台</h1>
-        <p class="hero-description">
-          面向企业投标团队的招标文件智能分析系统。上传招标 PDF 后，自动识别项目类型、
-          抽取关键要求、匹配企业资质与业绩，并输出可追溯的投标决策报告。
-        </p>
-        <div class="hero-actions">
-          <a class="button-primary" href="/agent/">立即体验智能体</a>
-          <a class="button-secondary" href="/projects/">查看项目看板</a>
-          <a class="button-secondary" href="/product/">了解产品功能</a>
-          <a class="button-secondary" href="/process/">查看AI分析流程</a>
+    <section v-if="currentPage === 'home'">
+      <div v-if="workspaceLoading" class="page-section">
+        <div class="loading-panel">
+          <p class="section-kicker">Workspace</p>
+          <h1>工作台加载中</h1>
+          <p>正在聚合项目池、企业档案和风险提醒...</p>
         </div>
       </div>
-
-      <aside class="report-preview" aria-label="AI招标分析报告预览">
-        <div class="preview-top">
-          <span>AI 分析报告</span>
-          <strong>推荐投标</strong>
-        </div>
-        <div class="score-card">
-          <div>
-            <span>综合匹配度</span>
-            <strong>91.8%</strong>
-          </div>
-          <div class="score-ring">A</div>
-        </div>
-        <div class="report-lines">
-          <div v-for="line in reportLines" :key="line.label" class="report-line">
-            <span>{{ line.label }}</span>
-            <strong>{{ line.value }}</strong>
-          </div>
-        </div>
-        <div class="risk-note">
-          <span></span>
-          已识别 3 项商务风险，2 项资质材料需补充，未发现高危废标条款。
-        </div>
-      </aside>
-
-      <div class="page-expansion home-expansion">
-        <div class="insight-strip">
-          <article v-for="item in homeStats" :key="item.label">
-            <strong>{{ item.value }}</strong>
-            <span>{{ item.label }}</span>
-          </article>
-        </div>
-        <div class="editorial-panel">
-          <div>
-            <p class="section-kicker">Why It Matters</p>
-            <h2>把“读标经验”沉淀成企业可复用的决策资产</h2>
-          </div>
-          <p>
-            系统不只给出一句建议，而是将项目摘要、资格条件、评分倾向、风险条款、
-            缺失材料和原文依据整合到同一份报告中，帮助企业在投与不投之间做出更稳的判断。
-          </p>
-        </div>
-        <div class="section-subhead wide">
-          <p class="section-kicker">Business Value</p>
-          <h2>让投标团队从被动读文件，转向主动筛机会</h2>
-        </div>
-        <div class="value-grid">
-          <article v-for="value in homeValues" :key="value.title">
-            <h3>{{ value.title }}</h3>
-            <p>{{ value.description }}</p>
-          </article>
-        </div>
-        <div class="anatomy-panel">
-          <div>
-            <p class="section-kicker">Report Anatomy</p>
-            <h2>一份报告同时服务经营判断、投标执行和管理复盘</h2>
-          </div>
-          <div class="anatomy-list">
-            <article v-for="item in reportAnatomy" :key="item.title">
-              <span>{{ item.index }}</span>
-              <div>
-                <h3>{{ item.title }}</h3>
-                <p>{{ item.description }}</p>
-              </div>
-            </article>
-          </div>
-        </div>
-        <div class="section-subhead wide">
-          <p class="section-kicker">Executive Dashboard</p>
-          <h2>从单个项目判断，延伸到企业级投标机会管理</h2>
-        </div>
-        <div class="dashboard-grid">
-          <article v-for="item in executiveDashboard" :key="item.title">
-            <span>{{ item.metric }}</span>
-            <h3>{{ item.title }}</h3>
-            <p>{{ item.description }}</p>
-          </article>
-        </div>
-        <div class="concern-panel">
-          <div>
-            <p class="section-kicker">Management Concerns</p>
-            <h2>管理层最关心的问题，可以被持续跟踪</h2>
-          </div>
-          <div class="concern-list">
-            <article v-for="item in managementConcerns" :key="item.question">
-              <strong>{{ item.question }}</strong>
-              <p>{{ item.answer }}</p>
-            </article>
+      <div v-else-if="workspaceState.error" class="page-section">
+        <div class="loading-panel loading-panel-error">
+          <p class="section-kicker">Workspace</p>
+          <h1>工作台暂时无法打开</h1>
+          <p>{{ workspaceState.error }}</p>
+          <div class="loading-panel-actions">
+            <button class="button-primary" type="button" @click="loadWorkspaceDashboard">重新加载</button>
+            <a class="button-secondary" href="/projects/">查看项目看板</a>
           </div>
         </div>
       </div>
+      <WorkspaceDashboard
+        v-else
+        :nav-items="workspaceNavItems"
+        :current-page="currentPage"
+        :company-name="companyForm.name"
+        :profile-completeness="profileCompletion"
+        :metrics="workspaceMetrics"
+        :projects="workspaceProjects"
+        :reminders="workspaceReminders"
+        :decision-class="decisionClass"
+        :risk-class="riskClass"
+      />
     </section>
 
     <section v-else-if="currentPage === 'product'" class="page-section content-page">
@@ -1233,6 +1158,12 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import WorkspaceDashboard from './components/workspace/WorkspaceDashboard.vue'
+import {
+  buildRiskReminders,
+  buildWorkspaceMetrics,
+  rankWorkspaceProjects,
+} from './workspace/dashboard-data.js'
 
 const routeMap = {
   '/': 'home',
@@ -1261,6 +1192,15 @@ const navItems = [
   { key: 'solutions', label: '解决方案', href: '/solutions/' },
   { key: 'process', label: 'AI分析流程', href: '/process/' },
   { key: 'scenes', label: '应用场景', href: '/scenes/' },
+]
+
+const workspaceNavItems = [
+  { key: 'home', label: '经营总览', href: '/' },
+  { key: 'agent', label: '智能分析', href: '/agent/' },
+  { key: 'projects', label: '机会池', href: '/projects/' },
+  { key: 'projects', label: '项目看板', href: '/projects/' },
+  { key: 'projects', label: '报告中心', href: '/projects/' },
+  { key: 'company', label: '企业档案', href: '/company/' },
 ]
 
 const sampleTenderText =
@@ -1322,6 +1262,10 @@ const companyState = reactive({
   error: '',
   message: '',
 })
+const workspaceState = reactive({
+  loading: true,
+  error: '',
+})
 const companyForm = reactive(emptyCompanyProfile())
 
 const filledQualifications = computed(() => companyForm.qualifications.filter((item) => item.name.trim()))
@@ -1348,6 +1292,12 @@ const profileSuggestions = computed(() => {
   if (!companyForm.forbidden_conditions.trim()) suggestions.push('补充禁投条件，帮助系统提前识别高风险项目。')
   return suggestions.length ? suggestions : ['档案基础信息较完整，可以进入智能体体验页进行分析。']
 })
+const workspaceProjects = computed(() => rankWorkspaceProjects(projectState.projects).slice(0, 5))
+const workspaceMetrics = computed(() => buildWorkspaceMetrics(projectState.projects))
+const workspaceReminders = computed(() => buildRiskReminders(projectState.projects))
+const workspaceLoading = computed(
+  () => workspaceState.loading || projectState.loading || companyState.loading,
+)
 const projectFilters = [
   { label: '全部项目', value: '' },
   { label: '推荐投标', value: 'recommended' },
@@ -1376,6 +1326,11 @@ const projectNoteTypes = [
 ]
 
 onMounted(async () => {
+  if (currentPage === 'home') {
+    await loadWorkspaceDashboard()
+    return
+  }
+
   if (currentPage === 'report') {
     await loadReportDetail()
     return
@@ -1406,6 +1361,19 @@ onMounted(async () => {
     agentState.error = '企业列表加载失败，请稍后刷新页面。'
   }
 })
+
+async function loadWorkspaceDashboard() {
+  workspaceState.loading = true
+  workspaceState.error = ''
+
+  try {
+    await Promise.all([loadProjectDashboard(), loadCompanyProfile()])
+  } catch (error) {
+    workspaceState.error = error.message || '工作台加载失败'
+  } finally {
+    workspaceState.loading = false
+  }
+}
 
 async function loadCompaniesForAgent() {
   const response = await fetch('/api/companies/')
@@ -1904,89 +1872,6 @@ async function runPdfAnalysis() {
     agentState.loading = false
   }
 }
-
-const reportLines = [
-  { label: '项目类型', value: '软件信息化' },
-  { label: '预算金额', value: '480万' },
-  { label: '资质匹配', value: '通过' },
-  { label: '业绩匹配', value: '高度匹配' },
-]
-
-const homeStats = [
-  { value: '80%', label: '减少初筛阅读时间' },
-  { value: '12项', label: '核心风险自动识别' },
-  { value: '5类', label: '投标建议分层输出' },
-]
-
-const homeValues = [
-  {
-    title: '降低无效投标投入',
-    description: '在报名和制作标书之前识别不匹配条件，减少团队在低胜率项目上的时间消耗。',
-  },
-  {
-    title: '提前发现关键风险',
-    description: '将废标条款、付款压力、工期约束和材料缺口前置到项目筛选阶段。',
-  },
-  {
-    title: '统一企业判断口径',
-    description: '用统一评分维度判断项目，避免不同人员因经验差异产生完全不同的投标结论。',
-  },
-  {
-    title: '沉淀项目筛选数据',
-    description: '保留推荐、谨慎、放弃原因，帮助企业复盘行业机会与自身短板。',
-  },
-]
-
-const reportAnatomy = [
-  {
-    index: '01',
-    title: '领导摘要',
-    description: '用短版结论说明项目价值、匹配度、主要风险和推荐动作。',
-  },
-  {
-    index: '02',
-    title: '资格核验',
-    description: '把资质、业绩、人员、地区、金额等门槛拆成可复核条目。',
-  },
-  {
-    index: '03',
-    title: '执行清单',
-    description: '列出报名、保证金、材料准备、方案评审和截止时间等后续动作。',
-  },
-]
-
-const executiveDashboard = [
-  {
-    metric: '机会池',
-    title: '项目价值分层',
-    description: '按预算金额、匹配度、截止时间和风险等级划分项目优先级，减少平均用力。',
-  },
-  {
-    metric: '风险池',
-    title: '高风险项目集中复核',
-    description: '把废标、付款、工期、资质缺口等风险归类，方便管理者快速看到问题集中在哪里。',
-  },
-  {
-    metric: '复盘池',
-    title: '放弃与中标原因沉淀',
-    description: '记录为什么推荐、为什么放弃、为什么未中标，让下一次筛选更接近企业真实胜率。',
-  },
-]
-
-const managementConcerns = [
-  {
-    question: '哪些项目值得优先投入？',
-    answer: '通过匹配度、金额、行业方向和截止时间组合排序，形成项目处理优先级。',
-  },
-  {
-    question: '哪些风险会影响中标或履约？',
-    answer: '把商务、技术、资格和履约风险分层呈现，避免只看到“能投”却忽视“难做”。',
-  },
-  {
-    question: '企业能力短板在哪里？',
-    answer: '从缺失资质、薄弱业绩、区域限制和人员要求中提炼可改进方向。',
-  },
-]
 
 const features = [
   {

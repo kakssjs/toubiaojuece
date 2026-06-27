@@ -16,6 +16,7 @@ frontend/.vite/
 frontend/.vite-temp/
 
 static/frontend/
+staticfiles/
 
 .env
 .env.*
@@ -24,3 +25,6 @@ static/frontend/
 .superpowers/
 
 *.zip
+
+.vercel
+.env*
