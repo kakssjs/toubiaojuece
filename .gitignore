@@ -22,3 +22,5 @@ static/frontend/
 !.env.example
 
 .superpowers/
+
+*.zip
