@@ -1,5 +1,5 @@
 <template>
-  <section class="workspace-panel">
+  <section class="workspace-panel workspace-panel-priority">
     <div class="workspace-panel-head">
       <div>
         <p class="section-kicker">Priority Queue</p>
@@ -10,7 +10,7 @@
 
     <div v-if="projects.length" class="workspace-opportunity-list">
       <article v-for="project in projects" :key="project.id" class="workspace-opportunity-row">
-        <div>
+        <div class="workspace-opportunity-main">
           <strong>{{ project.name }}</strong>
           <span>{{ project.project_type || '未识别类型' }} · {{ project.company_name }}</span>
         </div>

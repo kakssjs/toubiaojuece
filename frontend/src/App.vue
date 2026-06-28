@@ -1160,6 +1160,12 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import WorkspaceDashboard from './components/workspace/WorkspaceDashboard.vue'
 import {
+  demoCompany,
+  demoProjects,
+  demoReport,
+  demoSummary,
+} from './demo-data.js'
+import {
   buildRiskReminders,
   buildWorkspaceMetrics,
   rankWorkspaceProjects,
@@ -1176,15 +1182,42 @@ const routeMap = {
   '/projects/': 'projects',
 }
 
-const normalizedPath = window.location.pathname.endsWith('/')
-  ? window.location.pathname
-  : `${window.location.pathname}/`
+const githubPagesBase =
+  window.location.hostname.endsWith('github.io')
+    ? `/${window.location.pathname.split('/').filter(Boolean)[0] || ''}`
+    : ''
+const appPathname =
+  githubPagesBase && window.location.pathname.startsWith(githubPagesBase)
+    ? window.location.pathname.slice(githubPagesBase.length) || '/'
+    : window.location.pathname
+const normalizedPath = appPathname.endsWith('/') ? appPathname : `${appPathname}/`
 
 const reportMatch = normalizedPath.match(/^\/reports\/(\d+)\/$/)
 const projectMatch = normalizedPath.match(/^\/projects\/(\d+)\/$/)
 const currentPage = reportMatch ? 'report' : projectMatch ? 'projectDetail' : routeMap[normalizedPath] || 'home'
 const currentReportId = reportMatch ? reportMatch[1] : null
 const currentProjectId = projectMatch ? projectMatch[1] : null
+const isStaticShowcase =
+  window.location.protocol === 'file:' || window.location.hostname.endsWith('github.io')
+
+function setupStaticShowcaseNavigation() {
+  if (!isStaticShowcase || !githubPagesBase) {
+    return
+  }
+
+  document.addEventListener('click', (event) => {
+    const link = event.target.closest('a')
+    if (!link) return
+
+    const href = link.getAttribute('href') || ''
+    if (!href.startsWith('/') || href.startsWith('/api/')) {
+      return
+    }
+
+    event.preventDefault()
+    window.location.href = `${githubPagesBase}${href}`
+  })
+}
 
 const navItems = [
   { key: 'home', label: '首页', href: '/' },
@@ -1326,6 +1359,8 @@ const projectNoteTypes = [
 ]
 
 onMounted(async () => {
+  setupStaticShowcaseNavigation()
+
   if (currentPage === 'home') {
     await loadWorkspaceDashboard()
     return
@@ -1367,6 +1402,10 @@ async function loadWorkspaceDashboard() {
   workspaceState.error = ''
 
   try {
+    if (isStaticShowcase) {
+      loadStaticShowcaseData()
+      return
+    }
     await Promise.all([loadProjectDashboard(), loadCompanyProfile()])
   } catch (error) {
     workspaceState.error = error.message || '工作台加载失败'
@@ -1376,6 +1415,12 @@ async function loadWorkspaceDashboard() {
 }
 
 async function loadCompaniesForAgent() {
+  if (isStaticShowcase) {
+    companies.value = [{ id: demoCompany.id, name: demoCompany.name }]
+    agentForm.companyId = demoCompany.id
+    return
+  }
+
   const response = await fetch('/api/companies/')
   const payload = await response.json()
   if (!response.ok || !payload.ok) {
@@ -1392,6 +1437,10 @@ async function loadRecentAgentProjects() {
   agentState.recentError = ''
 
   try {
+    if (isStaticShowcase) {
+      agentState.recentProjects = demoProjects.slice(0, 3)
+      return
+    }
     const response = await fetch('/api/projects/recent/')
     const payload = await response.json()
     if (!response.ok || !payload.ok) {
@@ -1413,6 +1462,10 @@ async function loadReportDetail() {
   reportState.answers = []
 
   try {
+    if (isStaticShowcase) {
+      reportState.detail = demoReport
+      return
+    }
     const response = await fetch(`/api/reports/${currentReportId}/`)
     const payload = await response.json()
     if (!response.ok || !payload.ok) {
@@ -1437,6 +1490,16 @@ async function askReportQuestion(quickQuestion = '') {
   reportState.askError = ''
 
   try {
+    if (isStaticShowcase) {
+      reportState.answers.unshift({
+        id: Date.now(),
+        question,
+        answer: '这是 GitHub 展示模式的示例回答。真实追问需要连接后端服务后使用。',
+        references: ['演示数据'],
+      })
+      reportState.question = ''
+      return
+    }
     const response = await fetch(`/api/reports/${reportState.detail.id}/ask/`, {
       method: 'POST',
       headers: {
@@ -1469,6 +1532,14 @@ async function loadProjectDashboard(decision = projectState.decisionFilter) {
   projectState.decisionFilter = decision
 
   try {
+    if (isStaticShowcase) {
+      const rows = decision
+        ? demoProjects.filter((project) => project.decision === decision)
+        : demoProjects
+      projectState.projects = rows.map(normalizeProjectRow)
+      projectState.summary = demoSummary
+      return
+    }
     const params = decision ? `?decision=${encodeURIComponent(decision)}` : ''
     const response = await fetch(`/api/projects/${params}`)
     const payload = await response.json()
@@ -1492,6 +1563,36 @@ async function loadProjectDetail() {
   projectDetailState.detail = null
 
   try {
+    if (isStaticShowcase) {
+      projectDetailState.detail = {
+        ok: true,
+        project: normalizeProjectRow(demoProjects.find((item) => String(item.id) === String(currentProjectId)) || demoProjects[0]),
+        report: demoReport,
+        notes: [
+          {
+            id: 1,
+            note_type: 'follow_up',
+            note_type_label: '跟进记录',
+            content: 'GitHub 展示模式下的示例处理记录。',
+            operator_name: '演示账号',
+            created_at: '2026-06-27T11:00:00',
+          },
+        ],
+        workspace: {
+          risk_count: demoReport.risks.length,
+          material_count: demoReport.material_checklist.length,
+          next_actions: demoReport.next_actions,
+          risks: demoReport.risks,
+          missing_materials: demoReport.missing_materials,
+          material_checklist: demoReport.material_checklist,
+          agent_trace: demoReport.agent_trace,
+          qualification_match: demoReport.qualification_match,
+          experience_match: demoReport.experience_match,
+        },
+      }
+      projectDetailState.pendingStatus = projectDetailState.detail.project.status
+      return
+    }
     const response = await fetch(`/api/projects/${currentProjectId}/`)
     const payload = await response.json()
     if (!response.ok || !payload.ok) {
@@ -1522,6 +1623,11 @@ async function updateProjectDetailStatus() {
   projectDetailState.updating = true
 
   try {
+    if (isStaticShowcase) {
+      projectDetailState.detail.project.status = projectDetailState.pendingStatus
+      projectDetailState.actionError = 'GitHub 展示模式不会写入数据库，真实修改请使用服务器版本。'
+      return
+    }
     const response = await fetch(`/api/projects/${projectDetailState.detail.project.id}/status/`, {
       method: 'POST',
       headers: {
@@ -1547,6 +1653,9 @@ async function updateProjectDetailStatus() {
 }
 
 async function refreshProjectDetail() {
+  if (isStaticShowcase) {
+    return
+  }
   const response = await fetch(`/api/projects/${currentProjectId}/`)
   const payload = await response.json()
   if (!response.ok || !payload.ok) {
@@ -1565,6 +1674,18 @@ async function createProjectNote() {
   projectDetailState.creatingNote = true
 
   try {
+    if (isStaticShowcase) {
+      projectDetailState.detail.notes.unshift({
+        id: Date.now(),
+        note_type: projectDetailState.noteForm.note_type,
+        note_type_label: '演示记录',
+        content: projectDetailState.noteForm.content,
+        operator_name: projectDetailState.noteForm.operator_name,
+        created_at: new Date().toISOString(),
+      })
+      projectDetailState.noteForm.content = ''
+      return
+    }
     const response = await fetch(`/api/projects/${projectDetailState.detail.project.id}/notes/`, {
       method: 'POST',
       headers: {
@@ -1590,6 +1711,11 @@ async function updateProjectStatus(project) {
   projectState.updatingId = project.id
 
   try {
+    if (isStaticShowcase) {
+      project.status = project.pendingStatus
+      projectState.actionError = 'GitHub 展示模式不会写入数据库，真实修改请使用服务器版本。'
+      return
+    }
     const response = await fetch(`/api/projects/${project.id}/status/`, {
       method: 'POST',
       headers: {
@@ -1675,6 +1801,10 @@ async function loadCompanyProfile() {
   companyState.message = ''
 
   try {
+    if (isStaticShowcase) {
+      applyCompanyProfile(demoCompany)
+      return
+    }
     const response = await fetch('/api/company-profile/')
     const payload = await response.json()
     if (!response.ok || !payload.ok) {
@@ -1699,6 +1829,10 @@ async function saveCompanyProfile() {
 
   companyState.saving = true
   try {
+    if (isStaticShowcase) {
+      companyState.message = 'GitHub 展示模式不会写入数据库，真实保存请使用服务器版本。'
+      return
+    }
     const response = await fetch('/api/company-profile/', {
       method: 'POST',
       headers: {
@@ -1804,6 +1938,22 @@ async function runAgentAnalysis() {
 
   agentState.loading = true
   try {
+    if (isStaticShowcase) {
+      agentState.report = {
+        project_name: demoReport.project.name,
+        decision: demoReport.decision_label,
+        decision_reason: demoReport.summary,
+        match_score: demoReport.match_score,
+        risks: demoReport.risks,
+        next_actions: demoReport.next_actions,
+        qualification_match: demoReport.qualification_match,
+        material_checklist: demoReport.material_checklist,
+      }
+      agentState.projectId = demoReport.project.id
+      agentState.reportId = demoReport.id
+      await loadRecentAgentProjects()
+      return
+    }
     const response = await fetch('/api/agent/analyze/', {
       method: 'POST',
       headers: {
@@ -1853,6 +2003,23 @@ async function runPdfAnalysis() {
 
   agentState.loading = true
   try {
+    if (isStaticShowcase) {
+      agentState.report = {
+        project_name: demoReport.project.name,
+        decision: demoReport.decision_label,
+        decision_reason: demoReport.summary,
+        match_score: demoReport.match_score,
+        risks: demoReport.risks,
+        next_actions: demoReport.next_actions,
+        qualification_match: demoReport.qualification_match,
+        material_checklist: demoReport.material_checklist,
+      }
+      agentState.projectId = demoReport.project.id
+      agentState.reportId = demoReport.id
+      agentState.documentId = 1
+      await loadRecentAgentProjects()
+      return
+    }
     const response = await fetch('/api/agent/analyze-pdf/', {
       method: 'POST',
       body: formData,

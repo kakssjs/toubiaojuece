@@ -15,7 +15,8 @@
         :href="item.href"
         :class="{ active: currentPage === item.key }"
       >
-        {{ item.label }}
+        <span>{{ item.label }}</span>
+        <small aria-hidden="true">→</small>
       </a>
     </nav>
 
@@ -23,6 +24,9 @@
       <span class="workspace-company-label">当前企业</span>
       <strong>{{ companyName || '未设置企业档案' }}</strong>
       <p>档案完整度 {{ profileCompleteness }}%</p>
+      <div class="workspace-profile-bar" aria-hidden="true">
+        <span :style="{ width: `${profileCompleteness}%` }"></span>
+      </div>
     </div>
   </aside>
 </template>

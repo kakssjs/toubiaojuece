@@ -17,19 +17,13 @@ export function rankWorkspaceProjects(projects) {
   return [...projects].sort((left, right) => {
     const decisionGap =
       (DECISION_PRIORITY[right.decision] || 0) - (DECISION_PRIORITY[left.decision] || 0)
-    if (decisionGap !== 0) {
-      return decisionGap
-    }
+    if (decisionGap !== 0) return decisionGap
 
     const scoreGap = Number(right.match_score || 0) - Number(left.match_score || 0)
-    if (scoreGap !== 0) {
-      return scoreGap
-    }
+    if (scoreGap !== 0) return scoreGap
 
     const riskGap = (RISK_PRIORITY[left.risk_level] || 0) - (RISK_PRIORITY[right.risk_level] || 0)
-    if (riskGap !== 0) {
-      return riskGap
-    }
+    if (riskGap !== 0) return riskGap
 
     return new Date(right.created_at || 0).getTime() - new Date(left.created_at || 0).getTime()
   })
@@ -72,7 +66,6 @@ export function buildWorkspaceMetrics(projects) {
 export function buildRiskReminders(projects) {
   const highRiskProjects = projects.filter((project) => project.risk_level === '高')
   const recommendedProjects = projects.filter((project) => project.decision === 'recommended')
-
   const reminders = []
 
   if (highRiskProjects.length) {

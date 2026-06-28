@@ -17,6 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.conf import settings
 from django.conf.urls.static import static
+from django.contrib.staticfiles.views import serve as staticfiles_serve
 from django.urls import path
 
 from tenders.views import (
@@ -31,6 +32,7 @@ from tenders.views import (
     export_report_pdf,
     export_report_word,
     frontend_app,
+    frontend_static,
     list_companies,
     list_reference_tenders,
     project_dashboard,
@@ -41,6 +43,8 @@ from tenders.views import (
 )
 
 urlpatterns = [
+    path('static/<path:path>', staticfiles_serve, {'insecure': True}, name='staticfiles'),
+    path('static/frontend/<path:path>', frontend_static, name='frontend_static'),
     path('api/agent/analyze/', analyze_tender_agent, name='agent_analyze'),
     path('api/agent/analyze-pdf/', analyze_tender_pdf_agent, name='agent_analyze_pdf'),
     path('api/companies/', list_companies, name='company_list'),

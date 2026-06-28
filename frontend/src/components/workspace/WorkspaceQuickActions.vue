@@ -1,13 +1,15 @@
 <template>
   <div class="workspace-rail">
-    <section class="workspace-panel workspace-panel-compact">
+    <section class="workspace-panel workspace-panel-compact workspace-action-panel">
       <div class="workspace-panel-head compact">
         <div>
           <p class="section-kicker">Quick Analysis</p>
           <h2>快速分析</h2>
         </div>
       </div>
-      <p class="workspace-rail-copy">直接进入智能分析流程，继续上传 PDF 或粘贴招标文本。</p>
+      <p class="workspace-rail-copy">
+        直接进入智能分析流程，继续上传 PDF 或粘贴招标文件文本。
+      </p>
       <div class="workspace-rail-actions">
         <a class="button-primary" href="/agent/">上传标书分析</a>
         <a class="button-secondary" href="/company/">维护企业档案</a>

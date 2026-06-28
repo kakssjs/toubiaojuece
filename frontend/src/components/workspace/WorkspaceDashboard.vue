@@ -9,8 +9,13 @@
 
     <div class="workspace-main">
       <header class="workspace-hero">
-        <div>
+        <div class="workspace-hero-copy">
           <p class="section-kicker">Executive Dashboard</p>
+          <div class="workspace-hero-badges" aria-label="工作台能力">
+            <span>实时项目池</span>
+            <span>AI投标建议</span>
+            <span>风险优先级</span>
+          </div>
           <h1>今天优先处理哪些投标机会？</h1>
           <p>
             按匹配度、风险等级和项目状态聚合当前机会池，帮助投标团队先处理最值得投入的项目。

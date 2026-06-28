@@ -5,6 +5,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
+from django.views.static import serve
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods, require_POST
 
@@ -39,6 +40,10 @@ def frontend_app(request, *args, **kwargs):
         raise Http404('Vue frontend has not been built yet.')
 
     return FileResponse(index_path.open('rb'), content_type='text/html')
+
+
+def frontend_static(request, path):
+    return serve(request, path, document_root=Path(settings.BASE_DIR) / 'static' / 'frontend')
 
 
 @csrf_exempt
