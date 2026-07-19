@@ -1,0 +1,26 @@
+[project]
+name = "bid-agent"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "Django==6.0.6",
+  "asgiref==3.11.1",
+  "django-simpleui==2026.1.13",
+  "lxml==6.1.1",
+  "pillow==12.2.0",
+  "pypdf==6.14.2",
+  "python-docx==1.2.0",
+  "reportlab==5.0.0",
+  "PyMySQL>=1.1.1,<2",
+  "psycopg[binary]>=3.2,<4",
+  "sqlparse==0.5.5",
+  "typing_extensions==4.15.0",
+  "tzdata==2026.2",
+  "vercel>=0.5,<1",
+]
+
+[tool.vercel]
+entrypoint = "bid_agent.wsgi:application"
+
+[tool.vercel.scripts]
+build = "python build.py"
