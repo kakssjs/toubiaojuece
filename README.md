@@ -1,8 +1,14 @@
 # Bid Strategy
 
+[![CI](https://github.com/kakssjs/toubiaojuece/actions/workflows/ci.yml/badge.svg)](https://github.com/kakssjs/toubiaojuece/actions/workflows/ci.yml)
+
 **Bid Strategy** is an AI-assisted tender intelligence workspace that helps teams turn long, complex procurement documents into an actionable bid plan. It combines deterministic business rules with GPT-5.6 analysis so users can review requirements, surface risks, organize evidence, and make a more informed bid/no-bid decision.
 
-[Try the live project](https://kakssjs.github.io/toubiaojuece/) · [View the source repository](https://github.com/kakssjs/toubiaojuece)
+[Explore the static interactive showcase](https://kakssjs.github.io/toubiaojuece/) · [View the source repository](https://github.com/kakssjs/toubiaojuece)
+
+> **Demo note:** GitHub Pages is a frontend-only showcase. It uses sample data and fixed example results, and it does not upload files, save private data, or call GPT-5.6. Run the full application locally or deploy the Django backend to exercise the real analysis pipeline.
+
+![Bid Strategy opportunity dashboard](docs/bid-strategy-dashboard.png)
 
 ## What it does
 
@@ -47,7 +53,7 @@ Codex accelerated iteration across product design, frontend, backend, testing, a
 
 ## How GPT-5.6 was used
 
-GPT-5.6 powers the optional deep-review layer in the running application. The default model is configured as `gpt-5.6` through `OPENAI_ANALYSIS_MODEL`.
+GPT-5.6 powers the optional deep-review layer in the Django application. The default model is configured as `gpt-5.6` through `OPENAI_ANALYSIS_MODEL`. The public GitHub Pages showcase never calls the model; the integration runs only when the backend is deployed and explicitly configured with an API key.
 
 It is used to:
 
@@ -123,6 +129,8 @@ Never commit your `.env` file or API keys.
 python manage.py test
 node --test frontend/src/workspace/*.test.js
 ```
+
+The same build and test suite runs automatically for every push and pull request through [GitHub Actions](.github/workflows/ci.yml).
 
 ## Inspiration and lessons
 
