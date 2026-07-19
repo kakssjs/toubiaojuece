@@ -29,4 +29,6 @@ staticfiles/
 node_modules/
 output/
 outputs/
+github-pages-build/
+preview-root/
 .codex/

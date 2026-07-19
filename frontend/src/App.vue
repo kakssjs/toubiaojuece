@@ -18,6 +18,17 @@
       </nav>
     </header>
 
+    <aside v-if="isStaticShowcase" class="static-showcase-notice" role="note" aria-label="静态演示说明">
+      <div>
+        <span class="static-showcase-badge">Static Demo</span>
+        <strong>当前为静态交互演示</strong>
+        <p>页面使用示例数据展示完整流程，不会上传文件、保存数据或调用 GPT-5.6。</p>
+      </div>
+      <a href="https://github.com/kakssjs/toubiaojuece" target="_blank" rel="noopener noreferrer">
+        查看源码与本地运行说明
+      </a>
+    </aside>
+
     <div v-if="requiresWorkspaceAuth && authState.authenticated" class="workspace-session-bar">
       <span>当前账号：<strong>{{ authState.username }}</strong></span>
       <details class="notification-center">
@@ -1870,6 +1881,11 @@ import {
   buildWorkspaceMetrics,
   rankWorkspaceProjects,
 } from './workspace/dashboard-data.js'
+import {
+  appPathForLocation,
+  githubPagesBaseFor,
+  staticShowcaseHref,
+} from './workspace/github-pages-routing.js'
 import { listContracts } from './api/contracts.js'
 
 const routeMap = {
@@ -1889,14 +1905,8 @@ const brandMark = `${import.meta.env.BASE_URL}brand-mark-color.png`
 
 const privateWorkspacePages = new Set(['home', 'company', 'accounts', 'projects', 'projectDetail', 'report'])
 
-const githubPagesBase =
-  window.location.hostname.endsWith('github.io')
-    ? `/${window.location.pathname.split('/').filter(Boolean)[0] || ''}`
-    : ''
-const appPathname =
-  githubPagesBase && window.location.pathname.startsWith(githubPagesBase)
-    ? window.location.pathname.slice(githubPagesBase.length) || '/'
-    : window.location.pathname
+const githubPagesBase = githubPagesBaseFor(window.location, import.meta.env.BASE_URL)
+const appPathname = appPathForLocation(window.location, githubPagesBase)
 const normalizedPath = appPathname.endsWith('/') ? appPathname : `${appPathname}/`
 
 const reportMatch = normalizedPath.match(/^\/reports\/(\d+)\/$/)
@@ -1915,17 +1925,41 @@ function setupStaticShowcaseNavigation() {
     return
   }
 
+  const rewriteLink = (link) => {
+    const href = link.dataset.appHref || link.getAttribute('href') || ''
+    if (!href.startsWith('/') || href.startsWith('/api/')) return
+
+    link.dataset.appHref = href
+    link.setAttribute('href', staticShowcaseHref(href, githubPagesBase))
+  }
+
+  const rewriteInternalLinks = (root) => {
+    if (root instanceof HTMLAnchorElement) rewriteLink(root)
+    root.querySelectorAll?.('a[href^="/"]').forEach(rewriteLink)
+  }
+
+  rewriteInternalLinks(document)
+  const navigationObserver = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (node instanceof Element) rewriteInternalLinks(node)
+      })
+    })
+  })
+  navigationObserver.observe(document.body, { childList: true, subtree: true })
+
+  window.addEventListener('hashchange', () => window.location.reload())
   document.addEventListener('click', (event) => {
     const link = event.target.closest('a')
     if (!link) return
 
-    const href = link.getAttribute('href') || ''
+    const href = link.dataset.appHref || ''
     if (!href.startsWith('/') || href.startsWith('/api/')) {
       return
     }
 
     event.preventDefault()
-    window.location.href = `${githubPagesBase}${href}`
+    window.location.href = staticShowcaseHref(href, githubPagesBase)
   })
 }
 
