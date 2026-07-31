@@ -6,6 +6,8 @@ import re
 import urllib.error
 import urllib.request
 
+from .openai_config import openai_responses_url
+
 from pypdf import PdfReader
 from PIL import Image
 
@@ -127,7 +129,7 @@ def _call_openai_pdf_vision(file_path, filename):
         'max_output_tokens': int(os.getenv('OPENAI_PDF_MAX_OUTPUT_TOKENS', '12000')),
     }
     request = urllib.request.Request(
-        'https://api.openai.com/v1/responses',
+        openai_responses_url(),
         data=json.dumps(payload).encode('utf-8'),
         headers={
             'Authorization': f"Bearer {os.getenv('OPENAI_API_KEY', '').strip()}",

@@ -87,8 +87,16 @@ class OpenAIHybridAgentTests(SimpleTestCase):
         response = MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps(openai_payload).encode("utf-8")
 
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test", "OPENAI_ANALYSIS_ENABLED": "1"}, clear=False):
-            with patch("urllib.request.urlopen", return_value=response):
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENAI_API_KEY": "sk-test",
+                "OPENAI_API_BASE": "https://relay.example.com/v1/",
+                "OPENAI_ANALYSIS_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            with patch("urllib.request.urlopen", return_value=response) as urlopen:
                 report = TenderAnalysisAgent().analyze(
                     tender_text="智慧园区数字化平台建设项目，公开招标，预算金额480万元。",
                     company_profile={
@@ -98,6 +106,7 @@ class OpenAIHybridAgentTests(SimpleTestCase):
                 )
 
         self.assertEqual(report["analysis_engine"], "openai")
+        self.assertEqual(urlopen.call_args.args[0].full_url, "https://relay.example.com/v1/responses")
         self.assertEqual(report["match_score"], 91)
         self.assertEqual(report["review_summary"]["review_level"], "可推进")
         self.assertEqual(report["agent_trace"][-1]["agent"], "OpenAI深度审查Agent")

@@ -4,6 +4,7 @@ import urllib.error
 import urllib.request
 
 from .tender_analysis_agent import TenderAnalysisAgent as RuleBasedTenderAnalysisAgent
+from tenders.services.openai_config import openai_responses_url
 
 
 class HybridTenderAnalysisAgent:
@@ -69,7 +70,7 @@ class HybridTenderAnalysisAgent:
         }
 
         request = urllib.request.Request(
-            "https://api.openai.com/v1/responses",
+            openai_responses_url(),
             data=json.dumps(payload).encode("utf-8"),
             headers={
                 "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY', '').strip()}",
