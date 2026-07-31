@@ -13,7 +13,7 @@
         v-for="item in navItems"
         :key="item.label"
         :href="item.href"
-        :class="{ active: currentPage === item.key && item.label === activeLabel(item) }"
+        :class="{ active: currentPage === item.key }"
       >
         <component :is="iconFor(item)" aria-hidden="true" />
         <span>{{ item.label }}</span>
@@ -39,8 +39,6 @@
 import {
   ArchiveBoxIcon,
   BuildingOffice2Icon,
-  ChartBarSquareIcon,
-  DocumentChartBarIcon,
   HomeIcon,
   SparklesIcon,
 } from '@heroicons/vue/24/outline'
@@ -59,15 +57,8 @@ function iconFor(item) {
     经营总览: HomeIcon,
     智能分析: SparklesIcon,
     机会池: ArchiveBoxIcon,
-    项目看板: ChartBarSquareIcon,
-    报告中心: DocumentChartBarIcon,
     企业档案: BuildingOffice2Icon,
   }
   return icons[item.label] || HomeIcon
-}
-
-function activeLabel(item) {
-  if (item.key !== 'projects') return item.label
-  return '机会池'
 }
 </script>

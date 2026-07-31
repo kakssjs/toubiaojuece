@@ -309,8 +309,8 @@
         <p class="section-kicker">Product Features</p>
         <h1>产品功能</h1>
         <p>
-          覆盖招标文件阅读、抽取、匹配、风险识别与报告生成，帮助企业把投标筛选过程标准化、
-          数据化、可追溯。
+          从上传PDF到投标决策报告，完整覆盖文件解析、信息抽取、资质匹配、风险识别与报告生成，
+          帮助企业把投标判断从个人经验变成标准化、可复核的工作流。
         </p>
         <div class="product-mobile-actions" aria-label="产品体验入口">
           <a class="button-primary" href="/register/">免费创建企业账号</a>
@@ -388,7 +388,7 @@
         <div class="integration-panel">
           <div>
             <p class="section-kicker">Integration</p>
-            <h2>前端官网之后，可逐步接入真实业务能力</h2>
+            <h2>既能作为独立工具，也能融入企业已有投标流程</h2>
           </div>
           <div class="integration-steps">
             <article v-for="item in integrationSteps" :key="item.title">
@@ -413,15 +413,15 @@
         <p class="section-kicker">Solutions</p>
         <h1>解决方案</h1>
         <p>
-          为经营、售前、管理层和招采信息团队建立统一投标判断标准，减少无效投标，
-          让项目筛选更快、更稳、更可控。
+          把投标筛选从依赖个人判断变成团队共用的标准流程，让经营、售前、管理层和信息团队
+          各看各的维度，共用同一份事实依据。
         </p>
       </div>
       <div class="solution-layout">
         <div class="solution-copy">
           <p>
-            策标将企业能力档案、历史业绩、资质证书、禁投条件和招标文件要求进行统一比对，
-            输出清晰的推荐理由和风险边界。
+            策标将企业资质证书、历史业绩、服务区域、禁投条件与招标文件要求逐项比对，
+            输出有据可查的推荐建议和清晰的风险边界，减少临时会议和口头协调。
           </p>
           <dl>
             <div v-for="metric in metrics" :key="metric.label">
@@ -1941,13 +1941,11 @@ const workspaceNavItems = [
   { key: 'home', label: '经营总览', href: '/' },
   { key: 'agent', label: '智能分析', href: '/agent/' },
   { key: 'projects', label: '机会池', href: '/projects/' },
-  { key: 'projects', label: '项目看板', href: '/projects/' },
-  { key: 'projects', label: '报告中心', href: '/projects/' },
   { key: 'company', label: '企业档案', href: '/company/' },
 ]
 
 const sampleTenderText =
-  '智慧园区数字化平台建设项目，采购方式为公开招标，预算金额480万元。投标人须具备软件开发、系统集成相关能力，具有近三年类似项目业绩。本项目要求提供CMMI三级认证、ISO9001质量管理体系认证和原厂授权函。投标保证金为人民币5万元。付款条件为验收合格后支付70%，质保期满后支付30%。评分标准：技术分50分，商务分30分，价格分20分。投标截止时间为2026年7月20日09:30。'
+  '智慧园区数字化平台建设项目，采购方式为公开招标，预算金额480万元。投标人须具备软件开发、系统集成相关能力，具有近三年类似项目业绩。本项目要求提供CMMI三级认证、ISO9001质量管理体系认证和原厂授权函。投标保证金为人民币5万元。付款条件为验收合格后支付70%，质保期满后支付30%。评分标准：技术分50分，商务分30分，价格分20分。投标截止时间为2026年9月20日09:30。'
 
 const companies = ref([])
 const agentForm = reactive({
@@ -2265,77 +2263,16 @@ async function markNotificationRead(item) {
 }
 
 function loadStaticShowcaseData() {
-  projectState.projects = [
-    {
-      id: 1,
-      name: '智慧园区数字化平台建设项目',
-      project_type: '信息化',
-      company_name: '江苏省机关事务管理局',
-      budget_amount: 48000000,
-      match_score: 92,
-      decision: 'recommended',
-      decision_label: '强烈建议',
-      risk_level: '中',
-      created_at: '2026-07-14T09:30:00',
-    },
-    {
-      id: 2,
-      name: '城市轨道交通信号系统集成采购',
-      project_type: '工程建设',
-      company_name: '南京地铁集团有限公司',
-      budget_amount: 86000000,
-      match_score: 89,
-      decision: 'recommended',
-      decision_label: '建议投标',
-      risk_level: '低',
-      created_at: '2026-07-13T11:00:00',
-    },
-    {
-      id: 3,
-      name: '政务云资源扩容及运维服务项目',
-      project_type: '信息化',
-      company_name: '浙江省大数据局',
-      budget_amount: 12600000,
-      match_score: 78,
-      decision: 'recommended',
-      decision_label: '建议投标',
-      risk_level: '中',
-      created_at: '2026-07-12T15:00:00',
-    },
-    {
-      id: 4,
-      name: '综合管廊运营维护服务项目',
-      project_type: '服务采购',
-      company_name: '某市城建管理委员会',
-      budget_amount: 9800000,
-      match_score: 72,
-      decision: 'cautious',
-      decision_label: '谨慎评估',
-      risk_level: '高',
-      created_at: '2026-07-11T10:00:00',
-    },
-    {
-      id: 5,
-      name: '老旧小区改造工程设计施工总承包',
-      project_type: '工程建设',
-      company_name: '某区住房和城乡建设局',
-      budget_amount: 23500000,
-      match_score: 68,
-      decision: 'cautious',
-      decision_label: '可关注',
-      risk_level: '中',
-      created_at: '2026-07-10T08:30:00',
-    },
-  ]
-  projectState.summary = { total: 5, recommended: 3, cautious: 2, high_risk: 1 }
+  projectState.projects = demoProjects.map((p) => ({ ...p, pendingStatus: p.status }))
+  projectState.summary = { ...demoSummary, high_risk: demoSummary.high_risk ?? 1 }
   Object.assign(companyForm, {
-    name: '策标科技集团',
-    main_business: '企业数字化、软件开发、系统集成与智能决策服务',
-    service_regions: '华东、华中及全国重点城市',
-    max_project_amount: 100000000,
-    forbidden_conditions: '纯垫资项目不投，超长回款周期需升级审批',
-    qualifications: [],
-    experiences: [],
+    name: demoCompany.name,
+    main_business: demoCompany.main_business,
+    service_regions: demoCompany.service_regions,
+    max_project_amount: demoCompany.max_project_amount,
+    forbidden_conditions: demoCompany.forbidden_conditions,
+    qualifications: demoCompany.qualifications.map((q) => ({ ...q })),
+    experiences: demoCompany.experiences.map((e) => ({ ...e })),
   })
   projectState.loading = false
   companyState.loading = false
@@ -3635,33 +3572,33 @@ function buildClientPdfPath(fileName) {
 const features = [
   {
     index: '01',
-    title: 'PDF智能解析',
-    description: '支持招标文件、附件、澄清文件和扫描件解析，自动识别正文、表格、章节与页码来源。',
+    title: 'PDF 智能解析',
+    description: '支持招标正文、附件、澄清文件和扫描件，自动识别正文结构、表格内容、章节与页码来源。',
   },
   {
     index: '02',
     title: '招标信息抽取',
-    description: '提取项目名称、编号、预算、投标截止、资格要求、评分标准、保证金和付款条件。',
+    description: '提取项目名称、编号、预算限价、投标截止、资格要求、评分标准、保证金和付款条件。',
   },
   {
     index: '03',
     title: '企业资质匹配',
-    description: '将招标资格门槛与企业资质证书、服务范围、可承接金额和地区能力逐项比对。',
+    description: '将招标资格门槛与企业资质证书、业务范围、可承接金额和服务地区逐项对应，输出满足与缺口。',
   },
   {
     index: '04',
     title: '历史业绩匹配',
-    description: '自动查找企业过往类似项目，判断业绩年限、金额、行业、合同类型是否满足要求。',
+    description: '在企业已有案例中自动查找最相关的业绩，判断金额、行业、完工时间和合同类型是否满足要求。',
   },
   {
     index: '05',
     title: '风险条款识别',
-    description: '识别废标条款、付款周期、违约责任、工期压力、响应格式和商务偏离风险。',
+    description: '标注废标条款、付款压力、违约责任、工期风险、格式响应要求和商务偏离风险，按优先级排序。',
   },
   {
     index: '06',
     title: '投标决策报告',
-    description: '输出推荐理由、风险清单、缺失材料、关键要求与原文引用，支持后续导出和归档。',
+    description: '输出推荐理由、评分拆解、风险清单、缺失材料和下一步行动，结论可追溯至原文，支持导出归档。',
   },
 ]
 
@@ -3669,63 +3606,64 @@ const productMatrix = [
   {
     type: '解析层',
     title: '多附件统一解析',
-    description: '将招标正文、资格附件、评分表、合同条款和补遗文件统一纳入同一个分析任务。',
+    description: '招标正文、资格附件、评分表、合同条款和补遗文件统一纳入同一个分析任务，不需要分开处理。',
   },
   {
     type: '判断层',
     title: '企业画像动态匹配',
-    description: '围绕资质、业绩、人员、地区、预算和业务范围生成匹配结论，减少人工漏判。',
+    description: '围绕资质、业绩、人员、地区、预算和业务范围生成结构化匹配结论，减少人工逐项对照的遗漏。',
   },
   {
     type: '报告层',
     title: '领导摘要与执行清单',
-    description: '为管理层提供结论，为投标负责人提供材料清单、风险复核点和下一步动作。',
+    description: '管理层看结论摘要，投标负责人看材料清单、风险复核点和下一步动作，两份视图同一份数据。',
   },
 ]
 
 const deliverables = [
-  '项目关键信息摘要',
-  '投标资格匹配表',
-  '风险与废标条款清单',
+  '招标文件关键信息摘要',
+  '投标资格逐项匹配表',
+  '风险与废标条款优先级清单',
   '缺失材料与补充建议',
-  '投标决策建议报告',
+  '评分结构拆解与友好度分析',
+  '投标决策建议报告（可导出）',
 ]
 
 const capabilityRows = [
   {
     question: '这份标我们能不能投？',
-    answer: '综合企业资质、业务范围、地区限制、预算规模和禁投条件进行初步判断。',
+    answer: '综合企业资质、业务范围、地区限制、可承接金额和禁投条件进行初步判断，不靠人工逐条对照。',
     result: '输出推荐、谨慎或不建议投标。',
   },
   {
     question: '会不会因为材料问题废标？',
-    answer: '识别资格证明、授权材料、响应格式、签章要求、保证金和截止时间。',
-    result: '输出缺失材料与高风险条款。',
+    answer: '识别资格证明、原厂授权函、响应格式、签章要求、保证金缴纳时间和投标截止是否存在遗漏。',
+    result: '输出缺失材料清单与高风险条款。',
   },
   {
     question: '评分标准对我们是否有利？',
-    answer: '拆解商务分、技术分、价格分和业绩分，判断企业优势与短板。',
-    result: '输出评分友好度和补强方向。',
+    answer: '拆解商务分、技术分、价格分和业绩分的权重，判断企业优势能否在评分中得到充分体现。',
+    result: '输出评分友好度和需补强方向。',
   },
   {
-    question: '项目投入是否值得？',
-    answer: '结合预算金额、合同周期、付款条件、竞争风险和交付压力进行评估。',
-    result: '输出项目优先级和投入建议。',
+    question: '这个项目值得投入吗？',
+    answer: '结合预算金额、合同付款节奏、交付难度、竞争态势和已有资源综合评估投入产出。',
+    result: '输出项目优先级与投入建议。',
   },
 ]
 
 const systemFits = [
   {
     title: '独立筛标工作台',
-    description: '适合中小型投标团队直接上传文件、查看报告、导出结论并进行项目流转。',
+    description: '中小型投标团队可以直接上传文件、查看报告、导出结论和管理项目进度，无需额外系统。',
   },
   {
     title: '企业知识库增强',
-    description: '与企业资质、案例、人员、证书、区域能力等档案结合，形成持续更新的匹配依据。',
+    description: '将资质证书、历史案例、人员信息和区域能力沉淀为企业档案，作为持续更新的匹配依据。',
   },
   {
     title: '投标管理系统扩展',
-    description: '可作为现有 CRM、OA、项目管理或投标管理系统的 AI 分析模块。',
+    description: '可作为现有 CRM、OA、项目管理或投标管理平台的 AI 分析模块，无缝嵌入已有工作流。',
   },
 ]
 
@@ -3733,22 +3671,22 @@ const productChecklist = [
   {
     group: '资格',
     title: '主体资格与资质证书',
-    description: '检查营业范围、资质等级、证书有效期、授权关系和供应商资格要求。',
+    description: '核查营业范围、资质等级、证书有效期、原厂授权关系和供应商资格门槛，确认准入无缺口。',
   },
   {
     group: '业绩',
     title: '类似项目与金额门槛',
-    description: '判断案例行业、合同金额、完成时间、验收材料和客户类型是否符合要求。',
+    description: '匹配案例行业、合同金额、完工时间、验收材料和客户类型，判断过往业绩能否支撑评分要求。',
   },
   {
     group: '商务',
     title: '付款、保证金与合同条件',
-    description: '提取付款节点、履约保证、违约责任、报价方式和不可偏离条款。',
+    description: '提取付款节点、履约保证金比例、违约责任、报价方式和不可偏离的商务条款，识别合同风险边界。',
   },
   {
     group: '技术',
-    title: '服务范围与响应要求',
-    description: '识别技术参数、实施周期、验收标准、驻场要求和售后服务承诺。',
+    title: '服务范围与交付响应',
+    description: '梳理技术参数、实施周期、验收标准、驻场要求和售后服务承诺，判断交付难度与方案准备压力。',
   },
 ]
 
@@ -3756,47 +3694,47 @@ const integrationSteps = [
   {
     step: '01',
     title: '企业档案建模',
-    description: '录入资质、案例、人员、服务区域、业务方向和禁投条件。',
+    description: '录入资质、案例、人员、服务区域、业务方向和禁投条件，建立企业能力基线。',
   },
   {
     step: '02',
     title: '文件解析接入',
-    description: '接入 PDF、OCR、表格抽取和文本切分能力，形成可分析语料。',
+    description: '接入 PDF、OCR、表格抽取和文本切分能力，将标书转化为可分析语料。',
   },
   {
     step: '03',
     title: 'AI 分析编排',
-    description: '把抽取、分类、匹配、风险识别和报告生成串成稳定任务流。',
+    description: '将抽取、分类、匹配、风险识别和报告生成串成稳定的多 Agent 任务流。',
   },
   {
     step: '04',
     title: '协作与归档',
-    description: '将分析结论进入项目状态流转、负责人跟进、报告导出和历史复盘。',
+    description: '分析结论进入项目状态流转，支持负责人跟进、报告导出和历史复盘。',
   },
 ]
 
 const metrics = [
-  { value: '1min', label: '单份文件初步分析' },
+  { value: '< 1分钟', label: '单份文件完成初步分析' },
   { value: '10+', label: '核心投标判断维度' },
-  { value: 'A/B/C', label: '项目优先级分层' },
+  { value: '三级', label: '项目优先级自动分层' },
 ]
 
 const solutions = [
   {
     title: '经营与投标部门',
-    description: '快速筛掉不匹配项目，将时间集中在高价值、高胜率、高契合度的标的上。',
+    description: '快速过滤不匹配项目，把有限精力放在胜率高、价值大、风险可控的标的上。',
   },
   {
     title: '售前与方案团队',
-    description: '提前理解技术评分、服务范围、交付周期和响应材料，为方案准备争取时间。',
+    description: '提前看清技术评分偏好、服务范围和响应材料要求，为方案编制争取充足时间。',
   },
   {
     title: '企业管理层',
-    description: '用统一指标查看项目池质量、投标风险、推荐数量和放弃原因，提升管理透明度。',
+    description: '用统一数据掌握项目池质量、推荐比例、高风险项目和放弃原因，决策有据可查。',
   },
   {
     title: '招采信息团队',
-    description: '批量处理公告和文件，自动归类项目来源、行业方向、地区分布与截止时间。',
+    description: '批量导入公告和文件，自动按行业、地区、金额和截止时间完成初步分层。',
   },
 ]
 
@@ -3804,52 +3742,52 @@ const roleWorkflows = [
   {
     owner: '经营负责人',
     title: '从项目池中筛选高价值机会',
-    description: '按匹配度、预算金额、风险等级和截止时间进行排序，优先处理最值得投入的项目。',
+    description: '按匹配度、预算金额、风险等级和截止时间排序，把最值得投入的项目放在最前面。',
   },
   {
     owner: '投标经理',
     title: '快速确认资格与材料缺口',
-    description: '系统列出必须响应的资质、人员、业绩和商务材料，降低遗漏和废标概率。',
+    description: '系统逐条列出必须响应的资质、人员、业绩和商务要求，减少遗漏和废标风险。',
   },
   {
     owner: '方案负责人',
-    title: '提前理解评分偏好',
-    description: '识别技术分、商务分、价格分的权重，判断评分标准对企业优势是否友好。',
+    title: '提前掌握评分结构',
+    description: '了解技术分、商务分、价格分的权重分布，判断评分标准是否对企业优势有利。',
   },
   {
     owner: '管理层',
     title: '统一复盘投标质量',
-    description: '沉淀推荐、放弃、报名、中标与未中标原因，为后续投标策略提供数据依据。',
+    description: '沉淀推荐、放弃、报名和中标数据，为调整投标策略和资源配置提供依据。',
   },
 ]
 
 const governanceItems = [
   {
     title: '项目准入规则',
-    description: '将金额下限、区域限制、行业方向、资质门槛和禁投条件配置为企业级判断规则。',
+    description: '将金额下限、区域限制、行业方向、资质门槛和禁投条件配置为企业级统一判断规则，不靠人记。',
   },
   {
     title: '负责人处理机制',
-    description: '对推荐项目、谨慎项目和高风险项目设置不同处理状态，避免项目无人跟进。',
+    description: '推荐、谨慎、高风险项目分别进入不同处理状态，确保每个项目都有人跟进，不在池子里沉没。',
   },
   {
     title: '投标质量复盘',
-    description: '按中标率、放弃原因、风险类型和行业分布回看项目质量，优化后续筛选标准。',
+    description: '按中标率、放弃原因、风险类型和行业分布定期回看项目质量，持续校准筛选规则。',
   },
 ]
 
 const adoptionSteps = [
   {
     title: '第一阶段：单文件智能分析',
-    description: '先解决招标 PDF 快速阅读和投标建议输出问题。',
+    description: '上传招标 PDF，获取投标建议、风险清单和缺失材料，先把一份文件读透。',
   },
   {
     title: '第二阶段：企业档案匹配',
-    description: '录入资质、业绩、人员和业务范围，让判断结果更贴合企业实际。',
+    description: '录入资质、业绩、人员和业务范围，让每份报告都基于企业真实能力作出判断。',
   },
   {
     title: '第三阶段：批量项目看板',
-    description: '将多来源项目统一分层，形成投标机会池和负责人协作机制。',
+    description: '将多来源项目统一分层排序，形成投标机会池，支持团队协作跟进。',
   },
 ]
 
@@ -3857,37 +3795,37 @@ const departmentValues = [
   {
     department: '经营',
     title: '看项目质量',
-    description: '关注项目是否符合企业方向、预算是否值得投入、是否存在明显禁投条件。',
+    description: '关注项目类型是否符合企业方向、预算是否值得投入、有无明显的禁投条件。',
   },
   {
     department: '投标',
     title: '看材料缺口',
-    description: '关注资质、业绩、授权、签章、保证金和响应格式是否会造成废标。',
+    description: '关注资质证书、业绩材料、原厂授权、签章要求和保证金是否存在会导致废标的缺口。',
   },
   {
     department: '方案',
     title: '看技术胜率',
-    description: '关注评分标准、技术参数、实施周期和交付要求是否符合团队能力。',
+    description: '关注评分结构、技术参数、实施周期和验收要求，判断方案编制难度和技术得分空间。',
   },
   {
     department: '管理',
     title: '看投入产出',
-    description: '关注项目优先级、团队占用、风险敞口和中标复盘数据。',
+    description: '关注项目优先级排序、团队资源占用、风险敞口大小和历史同类项目的中标复盘数据。',
   },
 ]
 
 const managementBenefits = [
   {
     title: '减少临时拍板',
-    description: '用结构化报告替代碎片化讨论，让投标决策有统一依据。',
+    description: '用结构化报告替代碎片化讨论，让投标决策有统一依据，不依赖某一个人的判断。',
   },
   {
     title: '提升项目池透明度',
-    description: '管理者能看到项目来源、行业分布、风险等级和负责人处理状态。',
+    description: '管理者能看到项目来源、行业分布、风险等级和负责人处理状态，不靠口头汇报。',
   },
   {
     title: '持续优化投标策略',
-    description: '从放弃原因和失败原因中发现企业能力短板，反向指导资质和案例建设。',
+    description: '沉淀放弃原因和落标记录，反向识别企业能力短板，指导资质和案例的后续建设。',
   },
 ]
 
@@ -3895,199 +3833,199 @@ const processSteps = [
   {
     step: 'Step 01',
     title: '上传招标文件',
-    description: '上传 PDF、附件或扫描件，系统自动创建分析任务并记录文件状态。',
+    description: '支持 PDF、附件包和扫描件，系统自动创建分析任务并记录文件来源与上传状态。',
   },
   {
     step: 'Step 02',
-    title: 'OCR与文本解析',
-    description: '解析正文、目录、表格、页码和章节结构，为后续 AI 抽取提供干净语料。',
+    title: 'OCR 与文本解析',
+    description: '提取正文、目录、表格、页码和章节结构，将原始 PDF 转化为结构化可分析语料。',
   },
   {
     step: 'Step 03',
     title: '关键信息抽取',
-    description: '识别项目类型、采购方式、预算限价、资格要求、评分标准和合同条件。',
+    description: '识别项目类型、采购方式、预算限价、资格要求、评分标准、付款条件和投标截止时间。',
   },
   {
     step: 'Step 04',
     title: '企业能力匹配',
-    description: '结合企业档案中的资质、业绩、人员、地区、业务范围和禁投条件进行比对。',
+    description: '结合企业档案中的资质证书、历史业绩、服务地区、业务范围和禁投条件逐项比对。',
   },
   {
     step: 'Step 05',
-    title: '风险评估',
-    description: '综合商务、技术、时间、竞争和废标风险，形成可解释的风险等级。',
+    title: '风险综合评估',
+    description: '识别商务、技术、时间节点、废标条款和竞争风险，输出有优先级的风险清单。',
   },
   {
     step: 'Step 06',
     title: '生成决策报告',
-    description: '输出投标建议、推荐原因、缺失材料、关键原文引用和后续处理动作。',
+    description: '输出推荐建议与理由、缺失材料清单、关键原文引用和后续跟进动作，可导出归档。',
   },
 ]
 
 const agents = [
   {
-    title: '文档解析Agent',
-    description: '负责 PDF、扫描件、表格和章节结构解析，尽可能保留页码和原文位置。',
+    title: '文档解析 Agent',
+    description: '处理 PDF、扫描件、表格和章节结构，尽可能还原页码和原文位置，为后续分析提供干净语料。',
   },
   {
-    title: '资质匹配Agent',
-    description: '将招标门槛与企业档案逐条比对，输出满足、缺失、疑似不满足三类结论。',
+    title: '资质匹配 Agent',
+    description: '将招标资格门槛与企业档案逐条比对，输出满足、缺失和疑似不满足三类结论，不漏判。',
   },
   {
-    title: '风险分析Agent',
-    description: '识别付款、工期、违约、保证金、格式响应和废标条款中的关键风险。',
+    title: '风险分析 Agent',
+    description: '识别付款条件、工期压力、违约责任、保证金要求、格式响应和废标条款中的关键风险点。',
   },
   {
-    title: '决策建议Agent',
-    description: '综合匹配度、风险等级、材料缺口和竞争因素，形成投标建议与推荐理由。',
+    title: '决策建议 Agent',
+    description: '综合匹配度、风险等级、材料缺口和项目价值，形成推荐、谨慎或不建议投标的最终结论。',
   },
 ]
 
 const qualityControls = [
   {
     level: '字段级',
-    title: '关键字段校验',
-    description: '项目名称、金额、日期、保证金、开标方式等字段保留来源，便于人工复核。',
+    title: '关键字段保留来源',
+    description: '项目名称、金额、日期、保证金、开标方式等关键字段均关联原文页码，便于人工复核。',
   },
   {
     level: '条款级',
-    title: '风险条款定位',
-    description: '付款、违约、工期、格式响应、废标条款等内容按风险类型归类。',
+    title: '风险条款分类定位',
+    description: '付款、违约、工期、废标条款和格式响应要求，按风险类型归类标注，不混在正文里。',
   },
   {
     level: '结论级',
-    title: '建议理由拆解',
-    description: '投标建议由匹配度、缺口、风险、竞争与投入产出共同支撑。',
+    title: '建议理由可拆解',
+    description: '投标推荐结论拆分为匹配度、材料缺口、风险等级、竞争评估与投入产出，每项独立可查。',
   },
 ]
 
 const decisionLogic = [
   {
     title: '匹配度不是唯一标准',
-    description: '即使资质匹配，也会结合付款压力、交付难度和评分偏好判断是否值得投入。',
+    description: '资质匹配只是起点，系统还会综合付款压力、交付难度、评分偏好和竞争风险判断是否值得投入。',
   },
   {
     title: '风险项区分轻重缓急',
-    description: '系统将风险分为提示、需复核、高风险三类，帮助负责人快速排序处理。',
+    description: '风险分为"立即处理""重点关注""持续跟踪"三个等级，帮助负责人快速识别哪些条款不能拖。',
   },
   {
-    title: '报告支持二次追问',
-    description: '后续可结合问答 Agent 追问资质要求、评分标准、废标风险和材料清单。',
+    title: '报告支持对话式追问',
+    description: '报告生成后，可直接追问资质细节、评分规则、废标风险和材料清单，无需重新上传文件。',
   },
 ]
 
 const exceptionHandling = [
   {
     type: '扫描件',
-    title: '低质量文本提醒',
-    description: '当 OCR 置信度不足或表格结构复杂时，系统标记为需人工复核。',
+    title: '低质量文本标记提醒',
+    description: '当 OCR 置信度不足或表格结构复杂时，系统标记为需人工复核，不会静默输出低质量结论。',
   },
   {
     type: '冲突项',
-    title: '多处条款不一致',
-    description: '当公告、正文、附件或补遗文件存在时间和金额冲突时，系统提示对照确认。',
+    title: '多处条款存在矛盾',
+    description: '当公告、正文、附件或补遗文件存在时间、金额或条款冲突时，系统提示逐一对照确认。',
   },
   {
     type: '模糊项',
-    title: '要求表达不明确',
-    description: '对“类似项目”“相关资质”“不少于”等模糊表述保留原文，避免过度判断。',
+    title: '要求表达不够明确',
+    description: '对”类似项目””相关资质””不少于”等模糊表述保留原文，不过度推断，留给人工判断。',
   },
 ]
 
 const auditTrail = [
   {
     title: '任务记录',
-    description: '记录上传文件、分析时间、分析版本和处理状态，便于后续追踪。',
+    description: '记录文件上传时间、分析版本、处理状态和操作人，每一步都有可追溯的时间戳。',
   },
   {
     title: '结论记录',
-    description: '保留每次推荐结论、评分结果、风险等级和修改前后的处理意见。',
+    description: '保留每次推荐建议、评分结果、风险等级和负责人的处理意见，修改前后均可查。',
   },
   {
     title: '证据记录',
-    description: '关键字段和风险判断关联原文页码、章节或附件来源，方便复核审计。',
+    description: '关键字段和风险判断关联原文页码或章节来源，支持审计复核和后续归档查阅。',
   },
 ]
 
 const scenes = [
   {
     title: '政府采购项目',
-    description: '识别采购方式、资格条件、评分标准和政府采购常见响应要求。',
+    description: '自动识别采购方式、资格门槛、政策性要求、评分规则和常见响应格式要求。',
   },
   {
     title: '工程与建设项目',
-    description: '关注资质等级、项目经理要求、工期、保证金、履约责任和工程业绩。',
+    description: '重点核查资质等级、项目经理条件、工期约束、保证金要求和同类工程业绩。',
   },
   {
     title: '软件信息化项目',
-    description: '匹配软件著作权、系统集成能力、类似案例、技术方案要求和交付周期。',
+    description: '匹配软件著作权、系统集成能力、类似案例、技术方案要求和交付验收周期。',
   },
   {
     title: '服务采购项目',
-    description: '分析人员配置、服务范围、驻场要求、服务期限、考核标准和付款节点。',
+    description: '分析人员配置、驻场要求、服务期限、考核标准、付款节点与长期履约能力。',
   },
   {
     title: '框架协议采购',
-    description: '识别入围规则、报价方式、服务区域、二次竞价机制和长期履约风险。',
+    description: '梳理入围条件、报价机制、服务区域限制、二次竞价规则和长期合同风险。',
   },
   {
     title: '批量公告筛选',
-    description: '对每天新增的大量招标文件进行自动分层，优先推送高匹配项目。',
+    description: '对每日新增招标文件自动解析分层，按匹配度推送高价值项目，减少无效阅读。',
   },
 ]
 
 const scenarioDetails = [
   {
     title: '高频政府采购',
-    focus: '重点关注采购方式、资格条件、评分标准、政策性要求和响应文件格式。',
-    output: '适合批量公告初筛与投标优先级排序。',
+    focus: '重点关注采购方式、资格条件、评分标准、政策性要求和响应文件格式规范。',
+    output: '适合每日批量公告的初步筛选与投标优先级快速排序。',
   },
   {
     title: '大型信息化项目',
-    focus: '重点关注技术方案、系统集成能力、案例相似度、交付周期和运维要求。',
-    output: '适合售前团队快速判断方案准备难度。',
+    focus: '重点关注技术方案深度、系统集成能力、案例相似度、交付周期和运维服务要求。',
+    output: '适合售前团队提前判断方案准备难度与资源投入。',
   },
   {
     title: '工程建设项目',
-    focus: '重点关注资质等级、项目经理、工期节点、安全责任、履约保证和同类业绩。',
-    output: '适合工程类企业控制资格风险与履约风险。',
+    focus: '重点关注资质等级、项目经理条件、工期节点、安全责任、履约保证和同类业绩。',
+    output: '适合工程类企业提前识别资格风险和履约压力。',
   },
 ]
 
 const industryPlaybooks = [
   {
     title: '信息化与软件服务',
-    description: '关注技术路线、系统集成能力、运维服务、案例相似度、知识产权和交付周期。',
+    description: '关注技术路线合理性、系统集成资质、运维服务承诺、类似案例相似度和知识产权归属。',
   },
   {
     title: '工程建设与施工',
-    description: '关注资质等级、项目经理、施工周期、安全责任、履约保证和同类工程业绩。',
+    description: '关注施工资质等级、项目经理条件、施工周期合理性、安全责任边界和同类工程业绩要求。',
   },
   {
     title: '综合服务采购',
-    description: '关注服务团队、驻场要求、服务区域、考核方式、付款节点和长期履约能力。',
+    description: '关注服务团队配置、驻场要求、服务覆盖区域、考核指标、付款节点和长期履约风险。',
   },
   {
     title: '货物与设备采购',
-    description: '关注授权证明、供货周期、售后服务、质保要求、检测报告和价格评分规则。',
+    description: '关注品牌授权证明、供货周期、售后保障承诺、质保要求、检测报告和价格评分机制。',
   },
 ]
 
 const batchScreening = [
   {
     metric: '批量导入',
-    title: '每天新增公告自动入池',
-    description: '对多个招标文件同时解析，按行业、地区、金额、截止时间自动归类。',
+    title: '多份文件同步解析入池',
+    description: '同时处理多个招标文件，按行业、地区、金额和截止时间自动归类，无需逐份阅读。',
   },
   {
     metric: '优先级',
-    title: '高匹配项目优先推送',
-    description: '先让团队看到更值得投入的项目，减少无序阅读和临时决策。',
+    title: '高匹配项目优先展示',
+    description: '按企业能力匹配度自动排序，先让团队看到最值得投入的项目，减少无效判断。',
   },
   {
     metric: '预警',
-    title: '截止时间和风险同步提醒',
-    description: '对报名、保证金、投标截止和高风险条款进行提醒，避免错过关键节点。',
+    title: '关键节点与风险同步提醒',
+    description: '对报名截止、保证金缴纳、投标截止和高风险条款统一设置提醒，避免漏过关键时间点。',
   },
 ]
 
@@ -4095,37 +4033,37 @@ const evaluationDimensions = [
   {
     weight: '资质',
     title: '准入条件',
-    description: '判断企业是否具备投标资格，是所有场景的第一层筛选。',
+    description: '判断企业是否具备基本投标资格，是所有场景的第一道筛选，缺口直接影响是否废标。',
   },
   {
     weight: '业绩',
     title: '类似案例',
-    description: '判断过往项目是否能支撑评分和资格要求，尤其影响服务、工程和信息化项目。',
+    description: '判断过往项目能否支撑评分和资格要求，对服务类、工程类和信息化类项目影响最大。',
   },
   {
     weight: '商务',
     title: '合同风险',
-    description: '关注付款周期、保证金、违约责任和报价方式，决定项目投入边界。',
+    description: '关注付款周期、保证金比例、违约责任和报价限制，直接决定项目的资金和履约压力边界。',
   },
   {
     weight: '技术',
     title: '交付难度',
-    description: '关注实施周期、技术参数、服务范围和验收要求，判断方案准备压力。',
+    description: '关注实施周期紧张程度、技术参数门槛、服务范围宽度和验收严格程度，判断方案准备成本。',
   },
 ]
 
 const sceneQuestions = [
   {
     question: '这个场景最容易漏掉什么？',
-    answer: '不同场景风险不同，系统会按行业词典提示容易忽视的资格、材料和合同要求。',
+    answer: '不同场景的高频风险不同，系统按行业词典主动提示容易被忽视的资格条件、材料要求和合同条款。',
   },
   {
-    question: '批量项目如何排序？',
-    answer: '先按企业匹配度和截止时间分层，再结合风险等级和预算规模决定处理顺序。',
+    question: '批量项目如何决定处理顺序？',
+    answer: '先按企业匹配度和截止时间分层，再结合风险等级和预算规模综合排序，高价值项目最先出现。',
   },
   {
-    question: '为什么同样是推荐投标，优先级不同？',
-    answer: '推荐结论还会结合投入成本、竞争优势、付款条件和交付压力形成优先级。',
+    question: '为什么同样推荐投标，优先级却不同？',
+    answer: '推荐建议本身只是第一层结论，系统还会结合投入成本、竞争优势、付款条件和交付压力形成最终排序。',
   },
 ]
 </script>

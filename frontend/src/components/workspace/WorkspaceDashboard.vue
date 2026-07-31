@@ -15,7 +15,7 @@
         </div>
         <div class="workspace-topbar-actions">
           <button type="button" aria-label="搜索"><MagnifyingGlassIcon /></button>
-          <button type="button" aria-label="消息通知"><BellIcon /><span>3</span></button>
+          <button type="button" aria-label="消息通知"><BellIcon /><span v-if="overdueTaskCount">{{ overdueTaskCount }}</span></button>
           <button type="button" aria-label="帮助"><QuestionMarkCircleIcon /></button>
         </div>
       </header>
@@ -33,10 +33,10 @@
         <aside class="workspace-decision-summary">
           <span>今日决策摘要</span>
           <ul>
-            <li><CheckCircleIcon /><b>建议优先投标项目</b><strong>{{ recommendedCount || 6 }} 个</strong></li>
-            <li><ExclamationTriangleIcon /><b>高风险项目</b><strong>{{ highRiskCount || 2 }} 个</strong></li>
-            <li><ClockIcon /><b>临近截止（3 天内）</b><strong>4 个</strong></li>
-            <li><UserGroupIcon /><b>待团队跟进</b><strong>7 个</strong></li>
+            <li><CheckCircleIcon /><b>建议优先投标项目</b><strong>{{ recommendedCount }} 个</strong></li>
+            <li><ExclamationTriangleIcon /><b>高风险项目</b><strong>{{ highRiskCount }} 个</strong></li>
+            <li><ClockIcon /><b>待跟进任务</b><strong>{{ pendingTaskCount }} 项</strong></li>
+            <li><UserGroupIcon /><b>已逾期任务</b><strong>{{ overdueTaskCount }} 项</strong></li>
           </ul>
         </aside>
       </section>
@@ -84,6 +84,8 @@ const props = defineProps({
 
 const recommendedCount = computed(() => props.projects.filter((item) => item.decision === 'recommended').length)
 const highRiskCount = computed(() => props.projects.filter((item) => item.risk_level === '高').length)
+const pendingTaskCount = computed(() => props.projects.reduce((sum, item) => sum + Number(item.pending_task_count || 0), 0))
+const overdueTaskCount = computed(() => props.projects.reduce((sum, item) => sum + Number(item.overdue_task_count || 0), 0))
 const currentTime = ref(new Date())
 const timeGreeting = computed(() => greetingForHour(currentTime.value.getHours()))
 const currentDateLabel = computed(() => formatWorkspaceDate(currentTime.value))
