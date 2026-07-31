@@ -10,6 +10,7 @@ db.sqlite3
 logs
 tmp
 tmp-test-media
+output
 staticfiles
 frontend/node_modules
 frontend/.vite
