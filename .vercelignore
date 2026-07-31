@@ -12,6 +12,7 @@ tmp
 tmp-test-media
 output
 staticfiles
+static/frontend
 frontend/node_modules
 frontend/.vite
 frontend/.vite-temp
