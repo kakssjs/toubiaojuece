@@ -23,8 +23,16 @@ staticfiles/
 !.env.example
 
 .superpowers/
+.codex/
 
 *.zip
+
+node_modules/
+package-lock.json
+
+output/
+outputs/
+project-media/
 
 .vercel
 .env*
