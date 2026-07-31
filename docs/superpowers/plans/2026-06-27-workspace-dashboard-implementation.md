@@ -1,6 +1,6 @@
 # Workspace Dashboard Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Rework the current marketing-style Vue homepage into an executive workspace dashboard while preserving the existing product modules and Django-backed data flows.
 
@@ -46,11 +46,11 @@
 - Create: `frontend/src/components/workspace/WorkspaceOpportunityList.vue`
 - Create: `frontend/src/components/workspace/WorkspaceQuickActions.vue`
 
-- [ ] **Step 1: Create the workspace component directory**
+- [x] **Step 1: Create the workspace component directory**
 
 Use `apply_patch` to create the five new Vue component files under `frontend/src/components/workspace/`.
 
-- [ ] **Step 2: Add minimal component shells**
+- [x] **Step 2: Add minimal component shells**
 
 Create each file with a minimal `<template>` and `<script setup>` block so the app can import them without failing.
 
@@ -62,13 +62,13 @@ Expected component responsibilities:
 - `WorkspaceQuickActions.vue`: receives quick analysis state and risk reminders
 - `WorkspaceDashboard.vue`: composes the above components
 
-- [ ] **Step 3: Run a build to verify the empty scaffolding does not break Vite**
+- [x] **Step 3: Run a build to verify the empty scaffolding does not break Vite**
 
 Run: `npm.cmd run build`
 
 Expected: build succeeds and writes output into `static/frontend/`
 
-- [ ] **Step 4: Commit scaffold changes**
+- [x] **Step 4: Commit scaffold changes**
 
 ```bash
 git add frontend/src/components/workspace
@@ -82,15 +82,15 @@ git commit -m "feat: scaffold workspace dashboard components"
 - Create: `frontend/src/components/workspace/WorkspaceDashboard.vue`
 - Create: `frontend/src/components/workspace/WorkspaceSidebar.vue`
 
-- [ ] **Step 1: Update `App.vue` imports**
+- [x] **Step 1: Update `App.vue` imports**
 
 Import the new workspace components and remove direct homepage dashboard markup from the `home` branch of the main template.
 
-- [ ] **Step 2: Replace the current homepage hero block with `WorkspaceDashboard`**
+- [x] **Step 2: Replace the current homepage hero block with `WorkspaceDashboard`**
 
 The `currentPage === 'home'` branch should render the new dashboard component instead of the current marketing hero, stats, editorial, and value-grid sections.
 
-- [ ] **Step 3: Replace top marketing navigation usage with workspace-style nav props**
+- [x] **Step 3: Replace top marketing navigation usage with workspace-style nav props**
 
 Keep the current page-switching model, but pass dashboard-oriented navigation labels into `WorkspaceSidebar.vue`.
 
@@ -103,7 +103,7 @@ Navigation target labels should map to existing pages:
 - `报告中心` -> report-oriented routes already present in `App.vue`
 - `企业档案` -> `company`
 
-- [ ] **Step 4: Render current company summary in sidebar**
+- [x] **Step 4: Render current company summary in sidebar**
 
 Use existing company profile data already loaded in `App.vue` to derive:
 
@@ -112,13 +112,13 @@ Use existing company profile data already loaded in `App.vue` to derive:
 
 If there is no saved profile yet, render fallback values instead of leaving the sidebar blank.
 
-- [ ] **Step 5: Run build to verify the homepage view swap**
+- [x] **Step 5: Run build to verify the homepage view swap**
 
 Run: `npm.cmd run build`
 
 Expected: build succeeds and the app still renders all routes after static generation.
 
-- [ ] **Step 6: Commit the homepage view extraction**
+- [x] **Step 6: Commit the homepage view extraction**
 
 ```bash
 git add frontend/src/App.vue frontend/src/components/workspace/WorkspaceDashboard.vue frontend/src/components/workspace/WorkspaceSidebar.vue
@@ -132,7 +132,7 @@ git commit -m "feat: extract workspace dashboard homepage"
 - Create: `frontend/src/components/workspace/WorkspaceMetrics.vue`
 - Create: `frontend/src/components/workspace/WorkspaceOpportunityList.vue`
 
-- [ ] **Step 1: Identify existing project/company fetch logic in `App.vue`**
+- [x] **Step 1: Identify existing project/company fetch logic in `App.vue`**
 
 Reuse the current dashboard/project API integration rather than creating new endpoints.
 
@@ -141,7 +141,7 @@ Primary sources should stay:
 - `/api/projects/`
 - `/api/company-profile/`
 
-- [ ] **Step 2: Derive dashboard metrics in `App.vue`**
+- [x] **Step 2: Derive dashboard metrics in `App.vue`**
 
 Create computed or helper-derived values for:
 
@@ -156,7 +156,7 @@ Use the existing project payload fields like:
 - `risk_level`
 - `match_score`
 
-- [ ] **Step 3: Derive priority-ranked opportunity list**
+- [x] **Step 3: Derive priority-ranked opportunity list**
 
 Create a sorted top list from existing projects using this order:
 
@@ -167,17 +167,17 @@ Create a sorted top list from existing projects using this order:
 
 If current API data lacks enough deadline detail, use the best available fallback ordering and keep the implementation local to the frontend.
 
-- [ ] **Step 4: Pass metrics and prioritized projects into the dashboard child components**
+- [x] **Step 4: Pass metrics and prioritized projects into the dashboard child components**
 
 `WorkspaceDashboard.vue` should receive only the data it needs and pass smaller prop slices into `WorkspaceMetrics.vue` and `WorkspaceOpportunityList.vue`.
 
-- [ ] **Step 5: Build and verify metric rendering**
+- [x] **Step 5: Build and verify metric rendering**
 
 Run: `npm.cmd run build`
 
 Expected: build succeeds, and dashboard data bindings compile cleanly.
 
-- [ ] **Step 6: Commit data-mapping changes**
+- [x] **Step 6: Commit data-mapping changes**
 
 ```bash
 git add frontend/src/App.vue frontend/src/components/workspace/WorkspaceMetrics.vue frontend/src/components/workspace/WorkspaceOpportunityList.vue
@@ -190,11 +190,11 @@ git commit -m "feat: wire dashboard metrics and opportunities"
 - Modify: `frontend/src/App.vue`
 - Create: `frontend/src/components/workspace/WorkspaceQuickActions.vue`
 
-- [ ] **Step 1: Reuse existing analysis actions from `App.vue`**
+- [x] **Step 1: Reuse existing analysis actions from `App.vue`**
 
 Do not duplicate the full agent page. Expose a lightweight dashboard entry that reuses the same upload and analysis handlers already present for the agent flow.
 
-- [ ] **Step 2: Define dashboard risk reminder data**
+- [x] **Step 2: Define dashboard risk reminder data**
 
 Derive a concise set of alerts from existing project and report data, such as:
 
@@ -204,7 +204,7 @@ Derive a concise set of alerts from existing project and report data, such as:
 
 Keep the reminder count small and actionable.
 
-- [ ] **Step 3: Render quick actions rail in `WorkspaceQuickActions.vue`**
+- [x] **Step 3: Render quick actions rail in `WorkspaceQuickActions.vue`**
 
 Include:
 
@@ -214,17 +214,17 @@ Include:
 
 This is a shortcut surface, not the full agent workbench.
 
-- [ ] **Step 4: Keep full analysis on the `agent` page unchanged**
+- [x] **Step 4: Keep full analysis on the `agent` page unchanged**
 
 The dashboard rail must link or hand off into the existing `agent` workflow instead of re-implementing all result details in the sidebar.
 
-- [ ] **Step 5: Run build after wiring the right rail**
+- [x] **Step 5: Run build after wiring the right rail**
 
 Run: `npm.cmd run build`
 
 Expected: build succeeds and the quick action rail compiles with the current app state.
 
-- [ ] **Step 6: Commit quick action integration**
+- [x] **Step 6: Commit quick action integration**
 
 ```bash
 git add frontend/src/App.vue frontend/src/components/workspace/WorkspaceQuickActions.vue
@@ -241,7 +241,7 @@ git commit -m "feat: add dashboard quick analysis rail"
 - Modify: `frontend/src/components/workspace/WorkspaceOpportunityList.vue`
 - Modify: `frontend/src/components/workspace/WorkspaceQuickActions.vue`
 
-- [ ] **Step 1: Add or reorganize CSS tokens for dashboard surfaces**
+- [x] **Step 1: Add or reorganize CSS tokens for dashboard surfaces**
 
 Keep the existing brand palette, but define clear shared surface values for:
 
@@ -251,11 +251,11 @@ Keep the existing brand palette, but define clear shared surface values for:
 - muted text
 - warning and danger accents
 
-- [ ] **Step 2: Remove homepage-first hero styling from the active `home` path**
+- [x] **Step 2: Remove homepage-first hero styling from the active `home` path**
 
 The current oversized hero and editorial sections should no longer shape the homepage visual hierarchy.
 
-- [ ] **Step 3: Style dashboard sections for scanability**
+- [x] **Step 3: Style dashboard sections for scanability**
 
 Ensure the homepage supports:
 
@@ -264,17 +264,17 @@ Ensure the homepage supports:
 - quick scanning of metrics and project rows
 - restrained but intentional visual hierarchy
 
-- [ ] **Step 4: Keep mobile behavior intact**
+- [x] **Step 4: Keep mobile behavior intact**
 
 Reuse or extend responsive rules so the dashboard stacks cleanly on narrow screens without text overlap or broken button layouts.
 
-- [ ] **Step 5: Run build after style rework**
+- [x] **Step 5: Run build after style rework**
 
 Run: `npm.cmd run build`
 
 Expected: build succeeds with updated CSS bundle.
 
-- [ ] **Step 6: Commit dashboard styling pass**
+- [x] **Step 6: Commit dashboard styling pass**
 
 ```bash
 git add frontend/src/style.css frontend/src/components/workspace
@@ -288,19 +288,19 @@ git commit -m "feat: restyle homepage as workspace dashboard"
 - Modify: `frontend/src/style.css`
 - Modify: `frontend/src/components/workspace/*.vue`
 
-- [ ] **Step 1: Rebuild the frontend for Django**
+- [x] **Step 1: Rebuild the frontend for Django**
 
 Run: `npm.cmd run build`
 
 Expected: fresh files are emitted into `static/frontend/`
 
-- [ ] **Step 2: Verify Django health**
+- [x] **Step 2: Verify Django health**
 
 Run: `D:\\2\\.venv\\Scripts\\python.exe manage.py check`
 
 Expected: `System check identified no issues (0 silenced).`
 
-- [ ] **Step 3: Verify homepage HTML is served**
+- [x] **Step 3: Verify homepage HTML is served**
 
 Run:
 
@@ -310,7 +310,7 @@ Invoke-WebRequest -Uri "http://127.0.0.1:8001/" -UseBasicParsing
 
 Expected: `StatusCode` is `200`
 
-- [ ] **Step 4: Verify project API still serves data**
+- [x] **Step 4: Verify project API still serves data**
 
 Run:
 
@@ -320,7 +320,7 @@ Invoke-WebRequest -Uri "http://127.0.0.1:8001/api/projects/" -UseBasicParsing
 
 Expected: `StatusCode` is `200`
 
-- [ ] **Step 5: Visually inspect the homepage in the browser**
+- [x] **Step 5: Visually inspect the homepage in the browser**
 
 Check that:
 
@@ -328,7 +328,7 @@ Check that:
 - navigation still moves between existing product modules
 - metrics, opportunity list, and quick actions render without blank states breaking layout
 
-- [ ] **Step 6: Commit final verified implementation**
+- [x] **Step 6: Commit final verified implementation**
 
 ```bash
 git add frontend/src frontend/index.html static/frontend docs/superpowers/plans/2026-06-27-workspace-dashboard-implementation.md
