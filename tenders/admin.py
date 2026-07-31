@@ -1,4 +1,6 @@
 from django.contrib import admin
+from django.urls import reverse
+from django.utils.html import format_html
 
 from .models import (
     AnalysisReport,
@@ -10,7 +12,15 @@ from .models import (
     TenderDocument,
     TenderProject,
     TenderReference,
+    UserSecurityProfile,
 )
+
+
+@admin.register(UserSecurityProfile)
+class UserSecurityProfileAdmin(admin.ModelAdmin):
+    list_display = ('user', 'must_change_password', 'password_changed_at', 'updated_at')
+    list_filter = ('must_change_password',)
+    search_fields = ('user__username', 'user__email', 'user__first_name')
 
 
 class QualificationInline(admin.TabularInline):
@@ -27,9 +37,10 @@ class ProjectExperienceInline(admin.TabularInline):
 
 @admin.register(CompanyProfile)
 class CompanyProfileAdmin(admin.ModelAdmin):
-    list_display = ('name', 'service_regions', 'max_project_amount', 'updated_at')
+    list_display = ('name', 'owner', 'service_regions', 'max_project_amount', 'updated_at')
     search_fields = ('name', 'main_business', 'service_regions')
-    list_filter = ('created_at', 'updated_at')
+    list_filter = ('owner', 'created_at', 'updated_at')
+    autocomplete_fields = ('owner',)
     inlines = (QualificationInline, ProjectExperienceInline)
 
 
@@ -57,10 +68,17 @@ class TenderProjectAdmin(admin.ModelAdmin):
 
 @admin.register(TenderDocument)
 class TenderDocumentAdmin(admin.ModelAdmin):
-    list_display = ('original_name', 'tender_project', 'parse_status', 'file_size', 'created_at')
+    list_display = ('original_name', 'tender_project', 'parse_status', 'file_size', 'download_link', 'created_at')
     search_fields = ('original_name', 'tender_project__name', 'extracted_text')
     list_filter = ('parse_status', 'created_at')
     readonly_fields = ('created_at', 'updated_at')
+
+    @admin.display(description='原始文件')
+    def download_link(self, obj):
+        if not obj.pk or not obj.file:
+            return '-'
+        url = reverse('document_download', args=[obj.pk])
+        return format_html('<a href="{}">下载 PDF</a>', url)
 
 
 @admin.register(TenderReference)

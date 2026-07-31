@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 from django.test import TestCase
 
@@ -42,10 +43,45 @@ class TenderAnalysisAgentTests(TestCase):
         self.assertIn("CMMI三级认证", report["qualification_match"]["missing"])
         self.assertTrue(report["risks"])
         self.assertTrue(report["next_actions"])
+        self.assertTrue(report["material_checklist"])
+        self.assertTrue(report["scoring_breakdown"])
+        self.assertIn("review_level", report["review_summary"])
+        self.assertTrue(report["key_findings"])
         self.assertEqual(
             [step["agent"] for step in report["agent_trace"]],
             ["信息抽取Agent", "招标分类Agent", "资质匹配Agent", "业绩匹配Agent", "风险识别Agent", "投标决策Agent"],
         )
+
+    def test_extracts_pdf_style_fields_and_matches_profile_aliases(self):
+        from tenders.agents import TenderAnalysisAgent
+
+        tender_text = """
+        智慧园区数字化平台建设项目
+        项目预算 人民币 4,800,000 元
+        最高限价 人民币 4,650,000 元
+        建设地点 江苏省示范市智慧园区
+        投标截止时间 2026 年 8 月 20 日 09:30
+        要求CMMI三级认证、信息安全管理体系认证和原厂授权函，并具有智慧园区类似业绩。
+        """
+        company_profile = {
+            "qualifications": [
+                "CMMI三级软件能力证明",
+                "信息安全管理体系认证",
+            ],
+            "project_experiences": ["智慧园区综合管理平台"],
+            "business_scope": ["政企信息化系统集成"],
+        }
+
+        report = TenderAnalysisAgent().analyze(tender_text, company_profile)
+
+        self.assertEqual(report["budget_amount"], 4_800_000)
+        self.assertEqual(report["highest_limit_amount"], 4_650_000)
+        self.assertEqual(report["region"], "江苏")
+        self.assertEqual(report["deadline"], "2026-08-20 09:30")
+        self.assertIn("CMMI三级认证", report["qualification_match"]["matched"])
+        self.assertIn("信息安全管理体系认证", report["qualification_match"]["matched"])
+        self.assertEqual(report["qualification_match"]["missing"], ["原厂授权函"])
+        self.assertEqual(report["experience_match"]["matched_cases"], ["智慧园区综合管理平台"])
 
 
 class TenderAnalysisApiTests(TestCase):
@@ -66,6 +102,65 @@ class TenderAnalysisApiTests(TestCase):
         self.assertEqual(payload["ok"], True)
         self.assertEqual(payload["report"]["project_type"], "软件信息化")
         self.assertIn("risks", payload["report"])
+        self.assertIn("scoring_breakdown", payload["report"])
+        self.assertIn("review_summary", payload["report"])
+        self.assertEqual(payload["report"]["analysis_engine"], "rule_based")
+
+    def test_agent_api_only_uses_openai_when_explicitly_selected(self):
+        openai_report = {
+            "analysis_engine": "openai",
+            "project_type": "软件信息化",
+            "risks": [],
+        }
+        with patch("tenders.views.TenderAnalysisAgent.analyze", return_value=openai_report) as analyze:
+            response = self.client.post(
+                "/api/agent/analyze/",
+                data=json.dumps({
+                    "tender_text": SAMPLE_TENDER_TEXT,
+                    "company_profile": SAMPLE_COMPANY_PROFILE,
+                    "analysis_mode": "openai",
+                }),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["report"]["analysis_engine"], "openai")
+        analyze.assert_called_once()
+
+    def test_agent_api_rejects_unknown_analysis_mode(self):
+        response = self.client.post(
+            "/api/agent/analyze/",
+            data=json.dumps({
+                "tender_text": SAMPLE_TENDER_TEXT,
+                "company_profile": SAMPLE_COMPANY_PROFILE,
+                "analysis_mode": "automatic",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["ok"])
+
+    def test_agent_api_uses_agnes_when_explicitly_selected(self):
+        agnes_report = {
+            "analysis_engine": "agnes",
+            "project_type": "软件信息化",
+            "risks": [],
+        }
+        with patch("tenders.views.AgnesTenderAnalysisAgent.analyze", return_value=agnes_report) as analyze:
+            response = self.client.post(
+                "/api/agent/analyze/",
+                data=json.dumps({
+                    "tender_text": SAMPLE_TENDER_TEXT,
+                    "company_profile": SAMPLE_COMPANY_PROFILE,
+                    "analysis_mode": "agnes",
+                }),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["report"]["analysis_engine"], "agnes")
+        analyze.assert_called_once()
 
     def test_agent_analyze_api_requires_tender_text(self):
         response = self.client.post(
@@ -120,6 +215,7 @@ class TenderAnalysisApiTests(TestCase):
         self.assertEqual(project.company, company)
         self.assertEqual(project.name, payload["report"]["project_name"])
         self.assertEqual(project.project_type, "软件信息化")
+        self.assertIsNotNone(project.deadline)
         self.assertEqual(project.status, TenderProject.Status.ANALYZED)
         self.assertEqual(report.tender_project, project)
         self.assertEqual(report.match_score, payload["report"]["match_score"])

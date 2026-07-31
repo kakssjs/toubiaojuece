@@ -18,7 +18,7 @@ function normalizeContractPayload(contract) {
 async function parseJsonResponse(response) {
   const payload = await response.json().catch(() => ({}))
   if (!response.ok || payload.ok === false) {
-    throw new Error(payload.error || '合同数据保存失败')
+    throw new Error(payload.error || '合同标书数据请求失败')
   }
   return payload
 }

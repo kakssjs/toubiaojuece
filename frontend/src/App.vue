@@ -1,14 +1,8 @@
 ﻿<template>
   <main class="site-shell">
-    <header v-if="currentPage !== 'home'" class="site-header">
+    <header v-if="currentPage !== 'home'" class="site-header" :class="{ 'registration-header': currentPage === 'register' }">
       <a class="brand" href="/" aria-label="策标首页">
-        <span class="brand-symbol brand-logo" aria-hidden="true">
-          <svg viewBox="0 0 48 48" role="img" focusable="false">
-            <path class="brand-logo-core" d="M14 34L24 14L34 34" />
-            <path class="brand-logo-cross" d="M19 26H29" />
-            <path class="brand-logo-base" d="M11 38H37" />
-          </svg>
-        </span>
+        <img class="brand-symbol" :src="brandMark" alt="" />
         <span class="brand-text">策标</span>
       </a>
 
@@ -24,7 +18,177 @@
       </nav>
     </header>
 
-    <section v-if="currentPage === 'home'">
+    <div v-if="requiresWorkspaceAuth && authState.authenticated" class="workspace-session-bar">
+      <span>当前账号：<strong>{{ authState.username }}</strong></span>
+      <details class="notification-center">
+        <summary>
+          站内提醒
+          <b v-if="notificationState.unreadCount">{{ notificationState.unreadCount }}</b>
+        </summary>
+        <div class="notification-panel">
+          <div class="notification-panel-head">
+            <strong>任务提醒</strong>
+            <span>邮件/企微待配置</span>
+          </div>
+          <article v-for="item in notificationState.items" :key="item.id" :class="{ unread: item.reminder_unread }">
+            <a :href="`/projects/${item.project_id}/`">
+              <strong>{{ item.title }}</strong>
+              <span>{{ item.project_name }} · {{ taskReminderLabel(item) }}</span>
+            </a>
+            <button v-if="item.reminder_unread" type="button" @click="markNotificationRead(item)">标为已读</button>
+          </article>
+          <p v-if="!notificationState.items.length">当前没有到期提醒。</p>
+        </div>
+      </details>
+      <a v-if="authState.isStaff" href="/accounts/">账号管理</a>
+      <button type="button" @click="logoutUploads">退出登录</button>
+    </div>
+
+    <section v-if="requiresWorkspaceAuth && authState.loading" class="page-section workspace-auth-gate">
+      <div class="loading-panel">
+        <p class="section-kicker">Secure Workspace</p>
+        <h1>正在确认登录状态</h1>
+        <p>正在安全连接你的企业工作台...</p>
+      </div>
+    </section>
+
+    <section v-else-if="requiresWorkspaceAuth && !authState.authenticated" class="page-section workspace-auth-gate">
+      <div class="workspace-auth-panel">
+        <div>
+          <p class="section-kicker">Private Workspace</p>
+          <h1>登录后进入企业工作台</h1>
+          <p>项目、报告、企业档案和上传文件均按账号隔离，请使用后台账号登录。</p>
+        </div>
+        <form @submit.prevent="loginForUploads">
+          <label>
+            <span>账号</span>
+            <input v-model.trim="authState.usernameInput" autocomplete="username" placeholder="请输入账号" />
+          </label>
+          <label>
+            <span>密码</span>
+            <input v-model="authState.password" type="password" autocomplete="current-password" placeholder="请输入密码" />
+          </label>
+          <button class="button-primary" type="submit" :disabled="authState.loading">
+            {{ authState.loading ? '登录中...' : '登录并继续' }}
+          </button>
+          <p v-if="authState.error" class="agent-error">{{ authState.error }}</p>
+          <p class="auth-switch-copy">还没有账号？<a href="/register/">免费创建企业账号</a></p>
+        </form>
+      </div>
+    </section>
+
+    <section v-else-if="authState.authenticated && authState.mustChangePassword" class="page-section workspace-auth-gate">
+      <div class="workspace-auth-panel">
+        <div>
+          <p class="section-kicker">Account Security</p>
+          <h1>首次登录，请修改密码</h1>
+          <p>当前使用的是初始密码。完成修改后即可进入企业工作台。</p>
+        </div>
+        <form @submit.prevent="changeCurrentPassword">
+          <label>
+            <span>当前密码</span>
+            <input v-model="passwordChangeState.currentPassword" type="password" autocomplete="current-password" placeholder="请输入当前密码" />
+          </label>
+          <label>
+            <span>新密码</span>
+            <input v-model="passwordChangeState.newPassword" type="password" autocomplete="new-password" placeholder="至少 8 位，避免使用常见密码" />
+          </label>
+          <label>
+            <span>确认新密码</span>
+            <input v-model="passwordChangeState.confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入新密码" />
+          </label>
+          <div class="loading-panel-actions">
+            <button class="button-primary" type="submit" :disabled="passwordChangeState.saving">
+              {{ passwordChangeState.saving ? '正在修改...' : '修改密码并继续' }}
+            </button>
+            <button class="button-secondary" type="button" :disabled="passwordChangeState.saving" @click="logoutUploads">退出登录</button>
+          </div>
+          <p v-if="passwordChangeState.error" class="agent-error">{{ passwordChangeState.error }}</p>
+        </form>
+      </div>
+    </section>
+
+    <section v-else-if="currentPage === 'register'" class="registration-page">
+      <div class="registration-shell">
+        <aside class="registration-story">
+          <a class="registration-brand" href="/">
+            <img :src="brandMark" alt="" />
+            <span>策标</span>
+          </a>
+          <p class="registration-kicker">ENTERPRISE BID INTELLIGENCE</p>
+          <h1>从第一份标书开始，建立更高效的投标工作方式</h1>
+          <p class="registration-summary">注册后即可创建企业专属工作台，让机会筛选、风险研判和投标协作集中在一个清晰的流程中。</p>
+          <div class="registration-benefits" aria-label="注册权益">
+            <article>
+              <b>01</b>
+              <div><strong>智能解读标书</strong><span>快速提取资格、评分、时间和风险要点</span></div>
+            </article>
+            <article>
+              <b>02</b>
+              <div><strong>沉淀企业能力</strong><span>按企业档案持续匹配资质与项目经验</span></div>
+            </article>
+            <article>
+              <b>03</b>
+              <div><strong>统一团队协作</strong><span>集中管理机会、任务、报告和截止提醒</span></div>
+            </article>
+          </div>
+          <p class="registration-trust">数据按企业账号隔离 · 全程加密传输</p>
+        </aside>
+
+        <div class="registration-card">
+          <div class="registration-card-head">
+            <p>创建企业账号</p>
+            <h2>开启你的策标工作台</h2>
+            <span>已有账号？<a href="/">返回登录</a></span>
+          </div>
+          <form class="registration-form" @submit.prevent="registerAccount">
+            <div class="registration-field-grid">
+              <label>
+                <span>联系人姓名</span>
+                <input v-model.trim="registrationState.displayName" autocomplete="name" maxlength="30" placeholder="请输入真实姓名" />
+              </label>
+              <label>
+                <span>登录账号</span>
+                <input v-model.trim="registrationState.username" autocomplete="username" maxlength="30" placeholder="3-30 位字符" />
+              </label>
+            </div>
+            <label>
+              <span>企业名称</span>
+              <input v-model.trim="registrationState.companyName" autocomplete="organization" maxlength="120" placeholder="请输入完整企业名称" />
+            </label>
+            <label>
+              <span>工作邮箱</span>
+              <input v-model.trim="registrationState.email" type="email" autocomplete="email" placeholder="name@company.com" />
+            </label>
+            <div class="registration-field-grid">
+              <label>
+                <span>设置密码</span>
+                <input v-model="registrationState.password" type="password" autocomplete="new-password" placeholder="至少 8 位" />
+              </label>
+              <label>
+                <span>确认密码</span>
+                <input v-model="registrationState.confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入密码" />
+              </label>
+            </div>
+            <div class="password-strength" :data-strength="passwordStrength.level">
+              <div><i></i><i></i><i></i></div>
+              <span>{{ passwordStrength.label }}</span>
+            </div>
+            <label class="registration-agreement">
+              <input v-model="registrationState.acceptedTerms" type="checkbox" />
+              <span>我已阅读并同意策标服务协议和隐私政策</span>
+            </label>
+            <button class="button-primary registration-submit" type="submit" :disabled="registrationState.loading">
+              {{ registrationState.loading ? '正在创建账号...' : '免费创建企业账号' }}
+            </button>
+            <p v-if="registrationState.error" class="registration-message is-error" role="alert">{{ registrationState.error }}</p>
+            <p v-if="registrationState.message" class="registration-message is-success" role="status">{{ registrationState.message }}</p>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section v-else-if="currentPage === 'home'">
       <div v-if="workspaceLoading" class="page-section">
         <div class="loading-panel">
           <p class="section-kicker">Workspace</p>
@@ -43,21 +207,104 @@
           </div>
         </div>
       </div>
-      <WorkspaceDashboard
-        v-else
-        :nav-items="workspaceNavItems"
-        :current-page="currentPage"
-        :company-name="companyForm.name"
-        :profile-completeness="profileCompletion"
-        :metrics="workspaceMetrics"
-        :projects="workspaceProjects"
-        :reminders="workspaceReminders"
-        :decision-class="decisionClass"
-        :risk-class="riskClass"
-      />
+      <template v-else>
+        <WorkspaceDashboard
+          :nav-items="workspaceNavItems"
+          :current-page="currentPage"
+          :company-name="companyForm.name"
+          :profile-completeness="profileCompletion"
+          :metrics="workspaceMetrics"
+          :projects="workspaceProjects"
+          :reminders="workspaceReminders"
+          :decision-class="decisionClass"
+          :risk-class="riskClass"
+        />
+
+        <section class="home-contract-library">
+          <div class="home-contract-head">
+            <div>
+              <p class="section-kicker">Reference Library</p>
+              <h2>合同标书参考库</h2>
+              <p>恢复原主站的合同与标书参考样本，直接读取线上数据库中的真实资料。</p>
+            </div>
+            <a class="button-primary" href="/contracts/">进入合同库</a>
+          </div>
+
+          <div v-if="contractState.loading" class="contract-library-status">合同标书加载中...</div>
+          <div v-else-if="contractState.error" class="contract-library-status error">{{ contractState.error }}</div>
+          <div v-else class="home-contract-grid">
+            <article v-for="contract in homeContracts" :key="contract.id" class="home-contract-card">
+              <div class="contract-card-top">
+                <span>#{{ contract.id }}</span>
+                <strong>{{ contractTitle(contract) }}</strong>
+              </div>
+              <p>{{ contract.tender_content || contract.reference_points || '暂无标书内容摘要。' }}</p>
+              <dl>
+                <div>
+                  <dt>参考要点</dt>
+                  <dd>{{ firstLine(contract.reference_points) || '-' }}</dd>
+                </div>
+                <div>
+                  <dt>评分规则</dt>
+                  <dd>{{ firstLine(contract.scoring_rules) || '-' }}</dd>
+                </div>
+                <div>
+                  <dt>材料清单</dt>
+                  <dd>{{ firstLine(contract.material_checklist) || '-' }}</dd>
+                </div>
+              </dl>
+              <div class="contract-card-tags">
+                <span v-for="tag in contractTags(contract)" :key="tag">{{ tag }}</span>
+              </div>
+              <button class="contract-review-button" type="button" @click="selectContractForReview(contract.id)">
+                审查标书
+              </button>
+            </article>
+            <div v-if="!homeContracts.length" class="contract-library-status">当前还没有合同标书样本。</div>
+          </div>
+
+          <aside v-if="selectedReviewContract" class="contract-review-panel">
+            <div class="contract-review-head">
+              <div>
+                <p class="section-kicker">Review Desk</p>
+                <h3>{{ contractTitle(selectedReviewContract) }}</h3>
+              </div>
+              <span>{{ contractReviewScore(selectedReviewContract) }}%</span>
+            </div>
+            <div class="contract-review-summary">
+              <article>
+                <strong>审查结论</strong>
+                <p>{{ contractReviewConclusion(selectedReviewContract) }}</p>
+              </article>
+              <article>
+                <strong>风险标签</strong>
+                <p>{{ selectedReviewContract.risk_tags || '暂无风险标签。' }}</p>
+              </article>
+            </div>
+            <div class="contract-review-grid">
+              <article>
+                <span>标书内容</span>
+                <p>{{ selectedReviewContract.tender_content || '-' }}</p>
+              </article>
+              <article>
+                <span>参考要点</span>
+                <p>{{ selectedReviewContract.reference_points || '-' }}</p>
+              </article>
+              <article>
+                <span>评分规则</span>
+                <p>{{ selectedReviewContract.scoring_rules || '-' }}</p>
+              </article>
+              <article>
+                <span>材料清单</span>
+                <p>{{ selectedReviewContract.material_checklist || '-' }}</p>
+              </article>
+            </div>
+          </aside>
+        </section>
+      </template>
     </section>
 
-    <section v-else-if="currentPage === 'product'" class="page-section content-page">
+    <section v-else-if="currentPage === 'product'" class="page-section content-page product-page">
       <div class="page-heading">
         <p class="section-kicker">Product Features</p>
         <h1>产品功能</h1>
@@ -65,8 +312,17 @@
           覆盖招标文件阅读、抽取、匹配、风险识别与报告生成，帮助企业把投标筛选过程标准化、
           数据化、可追溯。
         </p>
+        <div class="product-mobile-actions" aria-label="产品体验入口">
+          <a class="button-primary" href="/register/">免费创建企业账号</a>
+          <a class="button-secondary" href="/">已有账号，立即登录</a>
+        </div>
       </div>
-      <div class="feature-grid">
+      <nav class="product-mobile-jump" aria-label="产品内容导航">
+        <a href="#product-core">核心能力</a>
+        <a href="#product-matrix">能力矩阵</a>
+        <a href="#product-output">交付成果</a>
+      </nav>
+      <div id="product-core" class="feature-grid">
         <article v-for="feature in features" :key="feature.title" class="feature-card">
           <span>{{ feature.index }}</span>
           <h3>{{ feature.title }}</h3>
@@ -75,7 +331,7 @@
       </div>
 
       <div class="page-expansion">
-        <div class="section-subhead">
+        <div id="product-matrix" class="section-subhead">
           <p class="section-kicker">Capability Matrix</p>
           <h2>从文件解析到领导摘要，覆盖投标前判断的关键链路</h2>
         </div>
@@ -86,7 +342,7 @@
             <p>{{ item.description }}</p>
           </article>
         </div>
-        <div class="deliverable-panel">
+        <div id="product-output" class="deliverable-panel">
           <div>
             <p class="section-kicker">Output</p>
             <h2>每次分析可沉淀为标准化交付物</h2>
@@ -144,6 +400,11 @@
             </article>
           </div>
         </div>
+      </div>
+      <div class="product-mobile-footer-cta">
+        <p class="section-kicker">Start Now</p>
+        <h2>从下一份标书开始，先做一次清晰判断</h2>
+        <a class="button-primary" href="/register/">免费创建企业账号</a>
       </div>
     </section>
 
@@ -327,9 +588,39 @@
         <p class="section-kicker">Live Agent Demo</p>
         <h1>智能体在线体验</h1>
         <p>
-          选择企业档案，粘贴一段招标文件文本，系统会调用当前规则版 AI 招投标智能体，
+          选择企业档案和分析引擎，粘贴一段招标文件文本，系统会按你的选择执行分析，
           自动生成投标建议、匹配评分、风险清单和下一步动作，并保存到后台。
         </p>
+      </div>
+
+      <section class="agent-auth-bar" :class="{ 'is-authenticated': authState.authenticated }">
+        <div>
+          <strong>{{ authState.authenticated ? `已登录：${authState.username}` : '登录后上传标书' }}</strong>
+          <span>{{ authState.authenticated ? '私有文件上传与分析已启用' : '使用后台账号登录，文件只存入私有云空间' }}</span>
+        </div>
+        <form v-if="!authState.authenticated" @submit.prevent="loginForUploads">
+          <input v-model.trim="authState.usernameInput" autocomplete="username" placeholder="账号" aria-label="账号" />
+          <input v-model="authState.password" type="password" autocomplete="current-password" placeholder="密码" aria-label="密码" />
+          <button class="button-primary" type="submit" :disabled="authState.loading">
+            {{ authState.loading ? '登录中...' : '登录' }}
+          </button>
+        </form>
+        <button v-else class="button-secondary" type="button" @click="logoutUploads">退出登录</button>
+        <p v-if="authState.error">{{ authState.error }}</p>
+      </section>
+
+      <div
+        class="analysis-engine-status"
+        :class="{ 'is-enhanced': agentForm.analysisMode !== 'rule_based' }"
+        role="status"
+        aria-live="polite"
+      >
+        <span class="engine-status-dot" aria-hidden="true"></span>
+        <div>
+          <strong>{{ systemEngineTitle }}</strong>
+          <span>{{ systemEngineDescription }}</span>
+        </div>
+        <small v-if="selectedEngineModel">{{ selectedEngineModel }}</small>
       </div>
 
       <div class="agent-workbench">
@@ -344,8 +635,47 @@
             </select>
           </label>
 
+          <fieldset class="analysis-mode-picker">
+            <legend>选择分析引擎</legend>
+            <label :class="{ active: agentForm.analysisMode === 'rule_based' }">
+              <input v-model="agentForm.analysisMode" type="radio" value="rule_based" />
+              <span>
+                <strong>本地规则</strong>
+                <small>快速、稳定，不调用外部模型</small>
+              </span>
+            </label>
+            <label
+              :class="{ active: agentForm.analysisMode === 'openai', disabled: !systemState.analysis.openai_enabled }"
+            >
+              <input
+                v-model="agentForm.analysisMode"
+                type="radio"
+                value="openai"
+                :disabled="!systemState.analysis.openai_enabled"
+              />
+              <span>
+                <strong>OpenAI 深度分析</strong>
+                <small>{{ systemState.analysis.openai_enabled ? '更深入的语义审查与建议' : '当前服务未配置' }}</small>
+              </span>
+            </label>
+            <label
+              :class="{ active: agentForm.analysisMode === 'agnes', disabled: !systemState.analysis.agnes_enabled }"
+            >
+              <input
+                v-model="agentForm.analysisMode"
+                type="radio"
+                value="agnes"
+                :disabled="!systemState.analysis.agnes_enabled"
+              />
+              <span>
+                <strong>Agnes AI 深度分析</strong>
+                <small>{{ systemState.analysis.agnes_enabled ? '推理与智能体工作流模型' : '等待配置 Agnes API Key' }}</small>
+              </span>
+            </label>
+          </fieldset>
+
           <div class="agent-upload-note">
-            <strong>企业档案会直接影响 AI 判断</strong>
+            <strong>企业档案会直接影响分析判断</strong>
             <span>维护主营业务、资质证书和历史业绩后，系统才能更准确判断是否建议投标。</span>
             <a href="/company/">维护企业能力档案</a>
           </div>
@@ -357,7 +687,15 @@
 
           <div class="agent-upload-note">
             <strong>优先推荐上传 PDF</strong>
-            <span>系统会自动提取文件文本并调用智能体分析。扫描件 OCR 将在后续版本增强。</span>
+            <span>支持文本型和扫描型 PDF；大文件将直传私有云存储，最大 50 MB。</span>
+          </div>
+
+          <div v-if="agentState.uploadStage" class="agent-upload-progress" aria-live="polite">
+            <div>
+              <strong>{{ agentState.uploadStage }}</strong>
+              <span>{{ agentState.uploadProgress }}%</span>
+            </div>
+            <progress :value="agentState.uploadProgress" max="100"></progress>
           </div>
 
           <label>
@@ -366,7 +704,7 @@
           </label>
 
           <div class="agent-actions">
-            <button class="button-primary" type="button" :disabled="agentState.loading" @click="runPdfAnalysis">
+            <button class="button-primary" type="button" :disabled="agentState.loading || !authState.authenticated" @click="runPdfAnalysis">
               {{ agentState.loading ? '分析中...' : '上传PDF并分析' }}
             </button>
             <button class="button-secondary" type="submit" :disabled="agentState.loading">
@@ -386,9 +724,29 @@
           </div>
 
           <div v-else>
+            <div
+              class="result-engine-status"
+              :class="`engine-${agentState.report.analysis_engine || 'rule_based'}`"
+            >
+              <span aria-hidden="true"></span>
+              本次使用：{{ analysisEngineLabel(agentState.report.analysis_engine) }}
+            </div>
+            <div v-if="agentState.extraction" class="document-extraction-status">
+              <div>
+                <span>文件识别</span>
+                <strong>{{ extractionMethodLabel(agentState.extraction.method) }}</strong>
+              </div>
+              <small>{{ agentState.extraction.character_count || 0 }} 个字符</small>
+              <p v-if="agentState.extraction.warning">{{ agentState.extraction.warning }}</p>
+            </div>
+            <div v-if="agentState.storage" class="document-storage-status">
+              <span>原始文件</span>
+              <strong>{{ storageBackendLabel(agentState.storage) }}</strong>
+              <p v-if="agentState.storage.warning">{{ agentState.storage.warning }}</p>
+            </div>
             <div class="result-header">
               <span>{{ agentState.report.project_type }}</span>
-              <strong>{{ agentState.report.decision }}</strong>
+              <strong :class="decisionClass(agentState.report.decision)">{{ agentState.report.decision }}</strong>
             </div>
             <div class="result-score">
               <span>综合匹配评分</span>
@@ -402,6 +760,18 @@
               <div>
                 <dt>项目预算</dt>
                 <dd>{{ formatBudget(agentState.report.budget_amount) }}</dd>
+              </div>
+              <div>
+                <dt>最高限价</dt>
+                <dd>{{ formatBudget(agentState.report.highest_limit_amount) }}</dd>
+              </div>
+              <div>
+                <dt>项目地区</dt>
+                <dd>{{ agentState.report.region || '-' }}</dd>
+              </div>
+              <div>
+                <dt>投标截止</dt>
+                <dd>{{ formatDateTime(agentState.report.deadline) }}</dd>
               </div>
               <div>
                 <dt>项目编号</dt>
@@ -420,10 +790,57 @@
               <h3>决策理由</h3>
               <p>{{ agentState.report.decision_reason }}</p>
             </div>
+            <div v-if="agentState.report.review_summary" class="review-overview">
+              <article>
+                <span>审查等级</span>
+                <strong>{{ agentState.report.review_summary.review_level || '-' }}</strong>
+              </article>
+              <article>
+                <span>材料状态</span>
+                <strong>{{ agentState.report.review_summary.material_status || '-' }}</strong>
+              </article>
+              <article>
+                <span>维度均分</span>
+                <strong>{{ agentState.report.review_summary.average_dimension_score ?? '-' }}</strong>
+              </article>
+              <article>
+                <span>高风险</span>
+                <strong>{{ agentState.report.review_summary.high_risk_count ?? 0 }}</strong>
+              </article>
+            </div>
+            <div v-if="agentState.report.scoring_breakdown?.length" class="result-section">
+              <h3>评分拆解</h3>
+              <div class="score-breakdown">
+                <article v-for="item in agentState.report.scoring_breakdown" :key="item.dimension">
+                  <div>
+                    <strong>{{ item.dimension }}</strong>
+                    <span>{{ item.weight }}</span>
+                  </div>
+                  <b>{{ item.score }}</b>
+                  <p>{{ item.comment }}</p>
+                </article>
+              </div>
+            </div>
+            <div v-if="agentState.report.key_findings?.length" class="result-section">
+              <h3>关键发现</h3>
+              <ul>
+                <li v-for="item in agentState.report.key_findings" :key="item">{{ item }}</li>
+              </ul>
+            </div>
             <div class="result-section">
               <h3>缺失材料</h3>
               <ul>
                 <li v-for="item in agentState.report.qualification_match.missing" :key="item">{{ item }}</li>
+                <li v-if="!agentState.report.qualification_match.missing?.length">暂无明确缺失材料。</li>
+              </ul>
+            </div>
+            <div class="result-section">
+              <h3>材料审查</h3>
+              <ul>
+                <li v-for="item in agentState.report.material_checklist" :key="item.category + item.name">
+                  {{ item.category }}｜{{ item.name }}｜{{ materialStatusLabel(item.status) }}
+                </li>
+                <li v-if="!agentState.report.material_checklist?.length">暂无材料清单。</li>
               </ul>
             </div>
             <div class="result-section">
@@ -432,6 +849,7 @@
                 <li v-for="risk in agentState.report.risks" :key="risk.type + risk.description">
                   {{ risk.level }}｜{{ risk.type }}：{{ risk.description }}
                 </li>
+                <li v-if="!agentState.report.risks?.length">暂无明显风险项。</li>
               </ul>
             </div>
             <div class="result-section">
@@ -551,6 +969,9 @@
             <div>
               <strong>{{ project.name }}</strong>
               <small>{{ project.company_name }}｜{{ project.procurement_method || '未识别采购方式' }}</small>
+              <small v-if="project.pending_task_count" :class="{ 'task-count-overdue': project.overdue_task_count }">
+                {{ project.overdue_task_count ? `${project.overdue_task_count} 项已逾期` : `${project.pending_task_count} 项待办` }}
+              </small>
             </div>
             <div>
               <span>{{ project.project_type || '未识别类型' }}</span>
@@ -630,6 +1051,28 @@
           </aside>
         </div>
 
+        <section class="decision-band" :class="`decision-band--${projectDecisionSummary.tone}`" aria-label="AI投标决策摘要">
+          <div class="decision-band-main">
+            <span>AI 投标决策</span>
+            <strong>{{ projectDecisionSummary.label }}</strong>
+            <p>{{ projectDecisionSummary.guidance }}</p>
+          </div>
+          <div class="decision-band-metrics">
+            <article>
+              <span>综合匹配度</span>
+              <b>{{ projectDecisionSummary.score }}</b>
+            </article>
+            <article>
+              <span>P0 高优风险</span>
+              <b>{{ projectDecisionSummary.highRiskCount }}</b>
+            </article>
+            <article>
+              <span>缺失材料</span>
+              <b>{{ projectDecisionSummary.missingMaterialCount }}</b>
+            </article>
+          </div>
+        </section>
+
         <div class="project-detail-grid">
           <section class="project-card">
             <h2>项目状态</h2>
@@ -659,23 +1102,116 @@
               <div><dt>采购方式</dt><dd>{{ projectDetailState.detail.project.procurement_method || '-' }}</dd></div>
               <div><dt>地区</dt><dd>{{ projectDetailState.detail.project.region || '-' }}</dd></div>
               <div><dt>预算金额</dt><dd>{{ formatBudget(projectDetailState.detail.project.budget_amount) }}</dd></div>
+              <div><dt>投标截止</dt><dd>{{ formatDateTime(projectDetailState.detail.project.deadline) }}</dd></div>
               <div><dt>风险等级</dt><dd>{{ projectDetailState.detail.project.risk_level }}</dd></div>
             </dl>
           </section>
 
-          <section class="project-card">
-            <h2>协作待办</h2>
+          <section v-if="projectDetailState.detail.workspace.review_summary" class="project-card wide">
+            <h2>审查总览</h2>
+            <div class="report-review-overview compact">
+              <article>
+                <span>审查等级</span>
+                <strong>{{ projectDetailState.detail.workspace.review_summary.review_level || '-' }}</strong>
+              </article>
+              <article>
+                <span>材料状态</span>
+                <strong>{{ projectDetailState.detail.workspace.review_summary.material_status || '-' }}</strong>
+              </article>
+              <article>
+                <span>维度均分</span>
+                <strong>{{ projectDetailState.detail.workspace.review_summary.average_dimension_score ?? '-' }}</strong>
+              </article>
+              <article>
+                <span>高风险</span>
+                <strong>{{ projectDetailState.detail.workspace.review_summary.high_risk_count ?? 0 }}</strong>
+              </article>
+            </div>
+          </section>
+
+          <section v-if="projectDetailState.detail.workspace.scoring_breakdown?.length" class="project-card wide">
+            <h2>评分拆解</h2>
+            <div class="score-breakdown report-score-breakdown">
+              <article v-for="item in projectDetailState.detail.workspace.scoring_breakdown" :key="item.dimension">
+                <div>
+                  <strong>{{ item.dimension }}</strong>
+                  <span>{{ item.weight }}</span>
+                </div>
+                <b>{{ item.score }}</b>
+                <p>{{ item.comment }}</p>
+              </article>
+            </div>
+          </section>
+
+          <section v-if="projectDetailState.detail.workspace.key_findings?.length" class="project-card wide">
+            <h2>关键发现</h2>
             <ul class="workspace-list">
-              <li v-for="item in projectDetailState.detail.workspace.next_actions" :key="item">{{ item }}</li>
-              <li v-if="!projectDetailState.detail.workspace.next_actions.length">暂无下一步动作。</li>
+              <li v-for="item in projectDetailState.detail.workspace.key_findings" :key="item">{{ item }}</li>
             </ul>
+          </section>
+
+          <section class="project-card">
+            <div class="task-card-heading">
+              <div>
+                <h2>协作待办</h2>
+                <p>AI 报告已自动转为可跟踪任务</p>
+              </div>
+              <span>{{ projectDetailState.detail.tasks.filter((task) => task.status === 'pending').length }} 项待处理</span>
+            </div>
+            <div class="project-task-list">
+              <article
+                v-for="task in projectDetailState.detail.tasks"
+                :key="task.id"
+                :class="['project-task-item', `is-${task.reminder_state}`]"
+              >
+                <button
+                  type="button"
+                  class="task-check"
+                  :aria-label="task.status === 'completed' ? `重新打开：${task.title}` : `标记完成：${task.title}`"
+                  :disabled="projectDetailState.updatingTaskId === task.id"
+                  @click="updateProjectTaskStatus(task)"
+                >
+                  {{ task.status === 'completed' ? '✓' : '' }}
+                </button>
+                <div>
+                  <strong>{{ task.title }}</strong>
+                  <span>{{ task.category_label }} · {{ taskReminderLabel(task) }}</span>
+                  <div class="task-settings-row">
+                    <label>
+                      <span>负责人</span>
+                      <input v-model.trim="task.assignee_name" :list="`task-assignees-${task.id}`" placeholder="未分配" />
+                      <datalist :id="`task-assignees-${task.id}`">
+                        <option v-for="name in projectDetailState.detail.available_assignees" :key="name" :value="name"></option>
+                      </datalist>
+                    </label>
+                    <label>
+                      <span>提醒时间</span>
+                      <input
+                        type="datetime-local"
+                        :value="task.remind_at_draft ?? toDateTimeInput(task.remind_at)"
+                        @input="task.remind_at_draft = $event.target.value"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      :disabled="projectDetailState.updatingTaskId === task.id"
+                      @click="saveProjectTaskSettings(task)"
+                    >
+                      {{ projectDetailState.updatingTaskId === task.id ? '保存中' : '保存' }}
+                    </button>
+                  </div>
+                </div>
+              </article>
+              <p v-if="!projectDetailState.detail.tasks.length" class="empty-note">暂无协作待办。</p>
+            </div>
+            <p v-if="projectDetailState.actionError" class="project-action-error">{{ projectDetailState.actionError }}</p>
           </section>
 
           <section class="project-card">
             <h2>材料清单</h2>
             <ul class="workspace-list">
               <li v-for="item in projectDetailState.detail.workspace.material_checklist" :key="item.category + item.name">
-                {{ item.category }}｜{{ item.name }}｜{{ item.status }}
+                {{ item.category }}｜{{ item.name }}｜{{ materialStatusLabel(item.status) }}
               </li>
               <li v-for="item in projectDetailState.detail.workspace.missing_materials" :key="item">
                 缺失材料｜{{ item }}
@@ -685,11 +1221,21 @@
           </section>
 
           <section class="project-card wide">
-            <h2>风险处理</h2>
+            <div class="risk-section-heading">
+              <div>
+                <p class="section-kicker">Risk Priority</p>
+                <h2>风险优先级</h2>
+              </div>
+              <span>按处置紧迫度自动排序</span>
+            </div>
             <div class="detail-risk-grid">
-              <article v-for="risk in projectDetailState.detail.workspace.risks" :key="risk.type + risk.description">
-                <span>{{ risk.level }}</span>
-                <h3>{{ risk.type }}</h3>
+              <article
+                v-for="risk in prioritizedRisks(projectDetailState.detail.workspace.risks)"
+                :key="riskTitle(risk) + risk.description"
+                :class="riskPriorityClass(risk.level)"
+              >
+                <span>{{ riskPriorityLabel(risk.level) }}</span>
+                <h3>{{ riskTitle(risk) }}</h3>
                 <p>{{ risk.description }}</p>
               </article>
               <p v-if="!projectDetailState.detail.workspace.risks.length">暂无风险项。</p>
@@ -699,7 +1245,7 @@
           <section class="project-card">
             <h2>资质与业绩匹配</h2>
             <dl class="detail-meta">
-              <div><dt>资质状态</dt><dd>{{ projectDetailState.detail.workspace.qualification_match.status || '-' }}</dd></div>
+              <div><dt>资质状态</dt><dd>{{ qualificationStatusLabel(projectDetailState.detail.workspace.qualification_match.status) }}</dd></div>
               <div><dt>资质评分</dt><dd>{{ projectDetailState.detail.workspace.qualification_match.score ?? '-' }}</dd></div>
               <div><dt>业绩评分</dt><dd>{{ projectDetailState.detail.workspace.experience_match.score ?? '-' }}</dd></div>
               <div><dt>业绩说明</dt><dd>{{ projectDetailState.detail.workspace.experience_match.summary || '-' }}</dd></div>
@@ -709,9 +1255,9 @@
           <section class="project-card">
             <h2>Agent执行轨迹</h2>
             <div class="trace-list compact">
-              <article v-for="step in projectDetailState.detail.workspace.agent_trace" :key="step.agent">
-                <span>{{ step.status }}</span>
-                <strong>{{ step.agent }}</strong>
+              <article v-for="(step, index) in projectDetailState.detail.workspace.agent_trace" :key="agentStepName(step) + index">
+                <span>{{ agentStatusLabel(step) }}</span>
+                <strong>{{ agentStepName(step) }}</strong>
               </article>
               <p v-if="!projectDetailState.detail.workspace.agent_trace.length">暂无执行轨迹。</p>
             </div>
@@ -912,6 +1458,76 @@
       </div>
     </section>
 
+    <section v-else-if="currentPage === 'accounts'" class="page-section content-page account-admin-page">
+      <div class="page-heading">
+        <p class="section-kicker">Account Administration</p>
+        <h1>账号与企业归属</h1>
+        <p>创建普通用户、分配企业档案并处理密码重置。管理员账号不会在这里被降权或覆盖。</p>
+      </div>
+
+      <div v-if="!authState.isStaff" class="loading-panel loading-panel-error">
+        <h2>没有管理权限</h2>
+        <p>当前账号不是管理员，无法访问账号管理页面。</p>
+      </div>
+      <div v-else-if="accountAdminState.loading" class="loading-panel">
+        <h2>账号数据加载中</h2>
+      </div>
+      <div v-else class="account-admin-layout">
+        <section class="account-admin-section account-create-section">
+          <div>
+            <p class="section-kicker">Create User</p>
+            <h2>创建普通账号</h2>
+          </div>
+          <form @submit.prevent="createManagedUser">
+            <input v-model.trim="managedUserForm.username" placeholder="登录账号" autocomplete="off" />
+            <input v-model.trim="managedUserForm.displayName" placeholder="姓名或昵称" autocomplete="off" />
+            <input v-model.trim="managedUserForm.email" type="email" placeholder="邮箱" autocomplete="off" />
+            <input v-model="managedUserForm.password" type="password" placeholder="初始密码（至少8位）" autocomplete="new-password" />
+            <button class="button-primary" type="submit" :disabled="accountAdminState.saving">创建账号</button>
+          </form>
+        </section>
+
+        <section class="account-admin-section">
+          <div>
+            <p class="section-kicker">Company Ownership</p>
+            <h2>企业归属分配</h2>
+          </div>
+          <div class="company-owner-list">
+            <article v-for="company in accountAdminState.companies" :key="company.id">
+              <div>
+                <strong>{{ company.name }}</strong>
+                <span>{{ company.owner_username ? `当前：${company.owner_username}` : '当前未分配' }}</span>
+              </div>
+              <select v-model="company.owner_id">
+                <option value="">不分配</option>
+                <option v-for="user in assignableUsers" :key="user.id" :value="user.id">{{ user.username }}</option>
+              </select>
+              <button class="button-secondary" type="button" @click="assignCompanyOwner(company)">保存</button>
+            </article>
+          </div>
+        </section>
+
+        <section class="account-admin-section">
+          <div>
+            <p class="section-kicker">Password Reset</p>
+            <h2>普通用户密码重置</h2>
+          </div>
+          <div class="managed-user-list">
+            <article v-for="user in resettableUsers" :key="user.id">
+              <div>
+                <strong>{{ user.username }}</strong>
+                <span>{{ user.display_name || user.email || '普通用户' }}</span>
+              </div>
+              <input v-model="managedPasswords[user.id]" type="password" placeholder="输入新密码" autocomplete="new-password" />
+              <button class="button-secondary" type="button" @click="resetManagedPassword(user)">重置</button>
+            </article>
+          </div>
+        </section>
+      </div>
+      <p v-if="accountAdminState.message" class="account-admin-message">{{ accountAdminState.message }}</p>
+      <p v-if="accountAdminState.error" class="agent-error">{{ accountAdminState.error }}</p>
+    </section>
+
     <section v-else-if="currentPage === 'report'" class="page-section content-page report-page">
       <div v-if="reportState.loading" class="loading-panel">
         <p class="section-kicker">Report</p>
@@ -944,10 +1560,32 @@
           </aside>
         </div>
 
-        <div class="report-overview">
-          <article>
-            <span>企业</span>
-            <strong>{{ reportState.detail.project.company?.name || '-' }}</strong>
+        <section class="decision-band" :class="`decision-band--${reportDecisionSummary.tone}`" aria-label="AI投标决策摘要">
+          <div class="decision-band-main">
+            <span>AI 投标决策</span>
+            <strong>{{ reportDecisionSummary.label }}</strong>
+            <p>{{ reportDecisionSummary.guidance }}</p>
+          </div>
+          <div class="decision-band-metrics">
+            <article>
+              <span>综合匹配度</span>
+              <b>{{ reportDecisionSummary.score }}</b>
+            </article>
+            <article>
+              <span>P0 高优风险</span>
+              <b>{{ reportDecisionSummary.highRiskCount }}</b>
+            </article>
+            <article>
+              <span>缺失材料</span>
+              <b>{{ reportDecisionSummary.missingMaterialCount }}</b>
+            </article>
+          </div>
+        </section>
+
+          <div class="report-overview">
+            <article>
+              <span>企业</span>
+              <strong>{{ reportState.detail.project.company?.name || '-' }}</strong>
           </article>
           <article>
             <span>采购方式</span>
@@ -958,75 +1596,143 @@
             <strong>{{ formatBudget(reportState.detail.project.budget_amount) }}</strong>
           </article>
           <article>
-            <span>报告编号</span>
-            <strong>#{{ reportState.detail.id }}</strong>
+            <span>最高限价</span>
+            <strong>{{ formatBudget(reportState.detail.raw_report?.highest_limit_amount) }}</strong>
           </article>
-        </div>
+          <article>
+            <span>项目地区</span>
+            <strong>{{ reportState.detail.project.region || '-' }}</strong>
+          </article>
+          <article>
+            <span>投标截止</span>
+            <strong>{{ formatDateTime(reportState.detail.project.deadline) }}</strong>
+          </article>
+          <article>
+            <span>报告编号</span>
+              <strong>#{{ reportState.detail.id }}</strong>
+            </article>
+          </div>
 
-        <div class="report-layout">
-          <section class="report-card">
-            <h2>资质匹配</h2>
-            <dl class="report-match">
-              <div>
+          <div v-if="reportState.detail.review_summary" class="report-review-overview">
+            <article>
+              <span>审查等级</span>
+              <strong>{{ reportState.detail.review_summary.review_level || '-' }}</strong>
+            </article>
+            <article>
+              <span>材料状态</span>
+              <strong>{{ reportState.detail.review_summary.material_status || '-' }}</strong>
+            </article>
+            <article>
+              <span>维度均分</span>
+              <strong>{{ reportState.detail.review_summary.average_dimension_score ?? '-' }}</strong>
+            </article>
+            <article>
+              <span>高风险</span>
+              <strong>{{ reportState.detail.review_summary.high_risk_count ?? 0 }}</strong>
+            </article>
+          </div>
+
+          <div class="report-layout">
+            <section v-if="reportState.detail.scoring_breakdown?.length" class="report-card wide">
+              <h2>评分拆解</h2>
+              <div class="score-breakdown report-score-breakdown">
+                <article v-for="item in reportState.detail.scoring_breakdown" :key="item.dimension">
+                  <div>
+                    <strong>{{ item.dimension }}</strong>
+                    <span>{{ item.weight }}</span>
+                  </div>
+                  <b>{{ item.score }}</b>
+                  <p>{{ item.comment }}</p>
+                </article>
+              </div>
+            </section>
+
+            <section v-if="reportState.detail.key_findings?.length" class="report-card wide">
+              <h2>关键发现</h2>
+              <ul>
+                <li v-for="item in reportState.detail.key_findings" :key="item">{{ item }}</li>
+              </ul>
+            </section>
+
+            <section class="report-card">
+              <h2>资质匹配</h2>
+              <dl class="report-match">
+                <div>
                 <dt>状态</dt>
-                <dd>{{ reportState.detail.qualification_match.status || '-' }}</dd>
+                <dd>{{ qualificationStatusLabel(reportState.detail.qualification_match.status) }}</dd>
               </div>
               <div>
                 <dt>评分</dt>
                 <dd>{{ reportState.detail.qualification_match.score ?? '-' }}</dd>
               </div>
-            </dl>
-            <h3>缺失材料</h3>
-            <ul>
-              <li v-for="item in reportState.detail.missing_materials" :key="item">{{ item }}</li>
-            </ul>
-          </section>
+              </dl>
+              <h3>缺失材料</h3>
+              <ul>
+                <li v-for="item in reportState.detail.missing_materials" :key="item">{{ item }}</li>
+                <li v-if="!reportState.detail.missing_materials.length">暂无明确缺失材料。</li>
+              </ul>
+            </section>
 
           <section class="report-card">
             <h2>业绩匹配</h2>
             <p>{{ reportState.detail.experience_match.summary || '暂无业绩匹配摘要' }}</p>
-            <h3>匹配案例</h3>
-            <ul>
-              <li v-for="item in reportState.detail.experience_match.matched_cases || []" :key="item">{{ item }}</li>
-            </ul>
-          </section>
+              <h3>匹配案例</h3>
+              <ul>
+                <li v-for="item in reportState.detail.experience_match.matched_cases || []" :key="item">{{ item }}</li>
+                <li v-if="!reportState.detail.experience_match.matched_cases?.length">暂无明确匹配案例。</li>
+              </ul>
+            </section>
 
           <section class="report-card wide">
-            <h2>风险清单</h2>
-            <div class="report-risk-grid">
-              <article v-for="risk in reportState.detail.risks" :key="risk.type + risk.description">
-                <span>{{ risk.level }}</span>
-                <h3>{{ risk.type }}</h3>
-                <p>{{ risk.description }}</p>
-              </article>
+            <div class="risk-section-heading">
+              <div>
+                <p class="section-kicker">Risk Priority</p>
+                <h2>风险优先级</h2>
+              </div>
+              <span>先处理可能影响投标资格与废标的事项</span>
             </div>
-          </section>
+            <div class="report-risk-grid">
+                <article
+                  v-for="risk in prioritizedRisks(reportState.detail.risks)"
+                  :key="riskTitle(risk) + risk.description"
+                  :class="riskPriorityClass(risk.level)"
+                >
+                  <span>{{ riskPriorityLabel(risk.level) }}</span>
+                  <h3>{{ riskTitle(risk) }}</h3>
+                  <p>{{ risk.description }}</p>
+                </article>
+                <p v-if="!reportState.detail.risks.length">暂无风险项。</p>
+              </div>
+            </section>
 
           <section class="report-card">
-            <h2>下一步动作</h2>
-            <ul>
-              <li v-for="item in reportState.detail.next_actions" :key="item">{{ item }}</li>
-            </ul>
-          </section>
+              <h2>下一步动作</h2>
+              <ul>
+                <li v-for="item in reportState.detail.next_actions" :key="item">{{ item }}</li>
+                <li v-if="!reportState.detail.next_actions.length">暂无下一步动作。</li>
+              </ul>
+            </section>
 
           <section class="report-card">
-            <h2>材料清单</h2>
-            <ul>
-              <li v-for="item in reportState.detail.material_checklist" :key="item.category + item.name">
-                {{ item.category }}｜{{ item.name }}
-              </li>
-            </ul>
-          </section>
+              <h2>材料清单</h2>
+              <ul>
+                <li v-for="item in reportState.detail.material_checklist" :key="item.category + item.name">
+                  {{ item.category }}｜{{ item.name }}｜{{ materialStatusLabel(item.status) }}
+                </li>
+                <li v-if="!reportState.detail.material_checklist.length">暂无材料清单。</li>
+              </ul>
+            </section>
 
           <section class="report-card wide">
             <h2>Agent执行轨迹</h2>
             <div class="trace-list">
-              <article v-for="step in reportState.detail.agent_trace" :key="step.agent">
-                <span>{{ step.status }}</span>
-                <strong>{{ step.agent }}</strong>
-              </article>
-            </div>
-          </section>
+                <article v-for="(step, index) in reportState.detail.agent_trace" :key="agentStepName(step) + index">
+                  <span>{{ agentStatusLabel(step) }}</span>
+                  <strong>{{ agentStepName(step) }}</strong>
+                </article>
+                <p v-if="!reportState.detail.agent_trace.length">暂无执行轨迹。</p>
+              </div>
+            </section>
 
           <section class="report-card wide report-qa-card">
             <div class="qa-heading">
@@ -1146,18 +1852,12 @@
       </div>
     </section>
 
-    <section class="closing-section">
-      <div>
-        <p class="section-kicker">Decision First</p>
-        <h2>让每一次投标决策都有依据、有速度、有边界。</h2>
-      </div>
-      <a class="button-primary" href="/">返回首页</a>
-    </section>
   </main>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { upload } from '@vercel/blob/client'
 import WorkspaceDashboard from './components/workspace/WorkspaceDashboard.vue'
 import {
   demoCompany,
@@ -1170,6 +1870,7 @@ import {
   buildWorkspaceMetrics,
   rankWorkspaceProjects,
 } from './workspace/dashboard-data.js'
+import { listContracts } from './api/contracts.js'
 
 const routeMap = {
   '/': 'home',
@@ -1179,8 +1880,14 @@ const routeMap = {
   '/scenes/': 'scenes',
   '/agent/': 'agent',
   '/company/': 'company',
+  '/accounts/': 'accounts',
+  '/register/': 'register',
   '/projects/': 'projects',
 }
+
+const brandMark = `${import.meta.env.BASE_URL}brand-mark-color.png`
+
+const privateWorkspacePages = new Set(['home', 'company', 'accounts', 'projects', 'projectDetail', 'report'])
 
 const githubPagesBase =
   window.location.hostname.endsWith('github.io')
@@ -1195,10 +1902,13 @@ const normalizedPath = appPathname.endsWith('/') ? appPathname : `${appPathname}
 const reportMatch = normalizedPath.match(/^\/reports\/(\d+)\/$/)
 const projectMatch = normalizedPath.match(/^\/projects\/(\d+)\/$/)
 const currentPage = reportMatch ? 'report' : projectMatch ? 'projectDetail' : routeMap[normalizedPath] || 'home'
+const requiresWorkspaceAuth = computed(() => privateWorkspacePages.has(currentPage) && !isStaticShowcase)
 const currentReportId = reportMatch ? reportMatch[1] : null
 const currentProjectId = projectMatch ? projectMatch[1] : null
 const isStaticShowcase =
-  window.location.protocol === 'file:' || window.location.hostname.endsWith('github.io')
+  window.location.protocol === 'file:' ||
+  window.location.hostname.endsWith('github.io') ||
+  new URLSearchParams(window.location.search).has('showcase')
 
 function setupStaticShowcaseNavigation() {
   if (!isStaticShowcase || !githubPagesBase) {
@@ -1242,6 +1952,7 @@ const sampleTenderText =
 const companies = ref([])
 const agentForm = reactive({
   companyId: '',
+  analysisMode: 'rule_based',
   tenderText: sampleTenderText,
   pdfFile: null,
 })
@@ -1252,9 +1963,90 @@ const agentState = reactive({
   projectId: null,
   reportId: null,
   documentId: null,
+  extraction: null,
+  storage: null,
+  uploadProgress: 0,
+  uploadStage: '',
   recentLoading: false,
   recentError: '',
   recentProjects: [],
+})
+const authState = reactive({
+  loading: true,
+  authenticated: false,
+  username: '',
+  isStaff: false,
+  mustChangePassword: false,
+  usernameInput: '',
+  password: '',
+  csrfToken: '',
+  error: '',
+})
+const registrationState = reactive({
+  loading: false,
+  displayName: '',
+  username: '',
+  companyName: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
+  acceptedTerms: false,
+  error: '',
+  message: '',
+})
+const passwordStrength = computed(() => {
+  const password = registrationState.password
+  if (!password) return { level: 0, label: '建议使用字母、数字和符号组合' }
+  let score = 0
+  if (password.length >= 8) score += 1
+  if (/[a-zA-Z]/.test(password) && /\d/.test(password)) score += 1
+  if (/[^a-zA-Z\d]/.test(password) && password.length >= 10) score += 1
+  return [
+    { level: 0, label: '密码强度较弱' },
+    { level: 1, label: '密码强度一般' },
+    { level: 2, label: '密码强度良好' },
+    { level: 3, label: '密码强度很强' },
+  ][score]
+})
+const passwordChangeState = reactive({
+  saving: false,
+  currentPassword: '',
+  newPassword: '',
+  confirmPassword: '',
+  error: '',
+})
+const accountAdminState = reactive({
+  loading: false,
+  saving: false,
+  error: '',
+  message: '',
+  users: [],
+  companies: [],
+})
+const managedUserForm = reactive({
+  username: '',
+  displayName: '',
+  email: '',
+  password: '',
+})
+const managedPasswords = reactive({})
+const assignableUsers = computed(() => accountAdminState.users.filter((user) => user.is_active))
+const resettableUsers = computed(() => accountAdminState.users.filter((user) => !user.is_staff && !user.is_superuser))
+const systemState = reactive({
+  loading: true,
+  error: '',
+  analysis: {
+    mode: 'user_selected',
+    default_mode: 'rule_based',
+    available_modes: ['rule_based'],
+    openai_configured: false,
+    openai_enabled: false,
+    model: '',
+    agnes_configured: false,
+    agnes_enabled: false,
+    agnes_model: 'agnes-2.0-flash',
+    fallback_enabled: true,
+  },
 })
 const reportState = reactive({
   loading: false,
@@ -1281,6 +2073,7 @@ const projectDetailState = reactive({
   noteError: '',
   updating: false,
   creatingNote: false,
+  updatingTaskId: null,
   detail: null,
   pendingStatus: '',
   noteForm: {
@@ -1288,6 +2081,11 @@ const projectDetailState = reactive({
     operator_name: '投标经理',
     content: '',
   },
+})
+const notificationState = reactive({
+  loading: false,
+  unreadCount: 0,
+  items: [],
 })
 const companyState = reactive({
   loading: false,
@@ -1299,6 +2097,12 @@ const workspaceState = reactive({
   loading: true,
   error: '',
 })
+const contractState = reactive({
+  loading: false,
+  error: '',
+  contracts: [],
+})
+const selectedContractId = ref(null)
 const companyForm = reactive(emptyCompanyProfile())
 
 const filledQualifications = computed(() => companyForm.qualifications.filter((item) => item.name.trim()))
@@ -1328,9 +2132,40 @@ const profileSuggestions = computed(() => {
 const workspaceProjects = computed(() => rankWorkspaceProjects(projectState.projects).slice(0, 5))
 const workspaceMetrics = computed(() => buildWorkspaceMetrics(projectState.projects))
 const workspaceReminders = computed(() => buildRiskReminders(projectState.projects))
+const reportDecisionSummary = computed(() => buildDecisionSummary(reportState.detail))
+const projectDecisionSummary = computed(() =>
+  buildDecisionSummary(projectDetailState.detail?.report, projectDetailState.detail?.workspace),
+)
 const workspaceLoading = computed(
   () => workspaceState.loading || projectState.loading || companyState.loading,
 )
+const systemEngineTitle = computed(() => {
+  if (systemState.loading) return '正在检测分析引擎'
+  if (agentForm.analysisMode === 'openai') return '已选择 OpenAI 深度分析'
+  if (agentForm.analysisMode === 'agnes') return '已选择 Agnes AI 深度分析'
+  return '已选择本地规则分析'
+})
+const systemEngineDescription = computed(() => {
+  if (systemState.loading) return '正在读取服务配置，请稍候。'
+  if (agentForm.analysisMode === 'openai') return '本次将调用 OpenAI；服务受限时自动切换到本地规则。'
+  if (agentForm.analysisMode === 'agnes') return '本次将调用 Agnes AI；服务受限时自动切换到本地规则。'
+  return '默认不调用 OpenAI，使用本地规则完成匹配、风险识别和投标建议。'
+})
+const selectedEngineModel = computed(() => {
+  if (agentForm.analysisMode === 'openai') return systemState.analysis.model
+  if (agentForm.analysisMode === 'agnes') return systemState.analysis.agnes_model
+  return ''
+})
+const homeContracts = computed(() => contractState.contracts.slice(0, 6))
+const selectedReviewContract = computed(() => {
+  if (!contractState.contracts.length) {
+    return null
+  }
+  return (
+    contractState.contracts.find((contract) => contract.id === selectedContractId.value) ||
+    contractState.contracts[0]
+  )
+})
 const projectFilters = [
   { label: '全部项目', value: '' },
   { label: '推荐投标', value: 'recommended' },
@@ -1361,41 +2196,153 @@ const projectNoteTypes = [
 onMounted(async () => {
   setupStaticShowcaseNavigation()
 
-  if (currentPage === 'home') {
-    await loadWorkspaceDashboard()
+  if (isStaticShowcase && privateWorkspacePages.has(currentPage)) {
+    await loadAuthStatus()
+    await loadCurrentPrivatePage()
     return
   }
 
-  if (currentPage === 'report') {
-    await loadReportDetail()
+  if (requiresWorkspaceAuth.value || currentPage === 'agent' || currentPage === 'register') {
+    await loadAuthStatus()
+  }
+
+  if (currentPage === 'register' && authState.authenticated) {
+    window.location.replace('/')
     return
   }
 
-  if (currentPage === 'projects') {
-    await loadProjectDashboard()
+  if (requiresWorkspaceAuth.value) {
+    if (authState.authenticated && !authState.mustChangePassword) await loadCurrentPrivatePage()
     return
   }
 
-  if (currentPage === 'projectDetail') {
-    await loadProjectDetail()
-    return
-  }
-
-  if (currentPage === 'company') {
-    await loadCompanyProfile()
-    return
-  }
-
-  if (currentPage !== 'agent') {
-    return
-  }
-
-  try {
-    await Promise.all([loadCompaniesForAgent(), loadRecentAgentProjects()])
-  } catch (error) {
-    agentState.error = '企业列表加载失败，请稍后刷新页面。'
+  if (currentPage === 'agent') {
+    await loadSystemStatus()
+    if (authState.authenticated && !authState.mustChangePassword) {
+      try {
+        await Promise.all([loadCompaniesForAgent(), loadRecentAgentProjects()])
+      } catch (error) {
+        agentState.error = '企业数据加载失败，请稍后刷新页面。'
+      }
+    }
   }
 })
+
+async function loadCurrentPrivatePage() {
+  let pageRequest
+  if (currentPage === 'home') pageRequest = loadWorkspaceDashboard()
+  if (currentPage === 'report') pageRequest = loadReportDetail()
+  if (currentPage === 'projects') pageRequest = loadProjectDashboard()
+  if (currentPage === 'projectDetail') pageRequest = loadProjectDetail()
+  if (currentPage === 'company') pageRequest = loadCompanyProfile()
+  if (currentPage === 'accounts') pageRequest = loadAccountAdministration()
+  await Promise.all([pageRequest, loadTaskNotifications()])
+}
+
+async function loadTaskNotifications() {
+  if (isStaticShowcase || !authState.authenticated) return
+  notificationState.loading = true
+  try {
+    const response = await fetch('/api/notifications/')
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) throw new Error(payload.error || '提醒加载失败')
+    notificationState.items = payload.notifications || []
+    notificationState.unreadCount = payload.unread_count || 0
+  } finally {
+    notificationState.loading = false
+  }
+}
+
+async function markNotificationRead(item) {
+  const response = await fetch(`/api/notifications/${item.id}/read/`, {
+    method: 'POST',
+    headers: { 'X-CSRFToken': authState.csrfToken },
+  })
+  const payload = await response.json()
+  if (!response.ok || !payload.ok) return
+  item.reminder_unread = false
+  notificationState.unreadCount = Math.max(0, notificationState.unreadCount - 1)
+}
+
+function loadStaticShowcaseData() {
+  projectState.projects = [
+    {
+      id: 1,
+      name: '智慧园区数字化平台建设项目',
+      project_type: '信息化',
+      company_name: '江苏省机关事务管理局',
+      budget_amount: 48000000,
+      match_score: 92,
+      decision: 'recommended',
+      decision_label: '强烈建议',
+      risk_level: '中',
+      created_at: '2026-07-14T09:30:00',
+    },
+    {
+      id: 2,
+      name: '城市轨道交通信号系统集成采购',
+      project_type: '工程建设',
+      company_name: '南京地铁集团有限公司',
+      budget_amount: 86000000,
+      match_score: 89,
+      decision: 'recommended',
+      decision_label: '建议投标',
+      risk_level: '低',
+      created_at: '2026-07-13T11:00:00',
+    },
+    {
+      id: 3,
+      name: '政务云资源扩容及运维服务项目',
+      project_type: '信息化',
+      company_name: '浙江省大数据局',
+      budget_amount: 12600000,
+      match_score: 78,
+      decision: 'recommended',
+      decision_label: '建议投标',
+      risk_level: '中',
+      created_at: '2026-07-12T15:00:00',
+    },
+    {
+      id: 4,
+      name: '综合管廊运营维护服务项目',
+      project_type: '服务采购',
+      company_name: '某市城建管理委员会',
+      budget_amount: 9800000,
+      match_score: 72,
+      decision: 'cautious',
+      decision_label: '谨慎评估',
+      risk_level: '高',
+      created_at: '2026-07-11T10:00:00',
+    },
+    {
+      id: 5,
+      name: '老旧小区改造工程设计施工总承包',
+      project_type: '工程建设',
+      company_name: '某区住房和城乡建设局',
+      budget_amount: 23500000,
+      match_score: 68,
+      decision: 'cautious',
+      decision_label: '可关注',
+      risk_level: '中',
+      created_at: '2026-07-10T08:30:00',
+    },
+  ]
+  projectState.summary = { total: 5, recommended: 3, cautious: 2, high_risk: 1 }
+  Object.assign(companyForm, {
+    name: '策标科技集团',
+    main_business: '企业数字化、软件开发、系统集成与智能决策服务',
+    service_regions: '华东、华中及全国重点城市',
+    max_project_amount: 100000000,
+    forbidden_conditions: '纯垫资项目不投，超长回款周期需升级审批',
+    qualifications: [],
+    experiences: [],
+  })
+  projectState.loading = false
+  companyState.loading = false
+  contractState.loading = false
+  contractState.contracts = []
+  selectedContractId.value = null
+}
 
 async function loadWorkspaceDashboard() {
   workspaceState.loading = true
@@ -1406,11 +2353,30 @@ async function loadWorkspaceDashboard() {
       loadStaticShowcaseData()
       return
     }
-    await Promise.all([loadProjectDashboard(), loadCompanyProfile()])
+    await Promise.all([loadProjectDashboard(), loadCompanyProfile(), loadContractsForHome()])
   } catch (error) {
     workspaceState.error = error.message || '工作台加载失败'
   } finally {
     workspaceState.loading = false
+  }
+}
+
+async function loadContractsForHome() {
+  contractState.loading = true
+  contractState.error = ''
+
+  try {
+    if (isStaticShowcase) {
+      contractState.contracts = []
+      selectedContractId.value = null
+      return
+    }
+    contractState.contracts = await listContracts()
+    selectedContractId.value = contractState.contracts[0]?.id || null
+  } catch (error) {
+    contractState.error = error.message || '合同标书加载失败'
+  } finally {
+    contractState.loading = false
   }
 }
 
@@ -1428,8 +2394,326 @@ async function loadCompaniesForAgent() {
   }
   companies.value = payload.companies
   if (!agentForm.companyId && companies.value.length > 0) {
-    agentForm.companyId = companies.value[0].id
+    agentForm.companyId =
+      companies.value.find((company) => company.name.includes('小苏'))?.id || companies.value[0].id
   }
+}
+
+async function loadAuthStatus() {
+  if (isStaticShowcase) {
+    authState.authenticated = true
+    authState.username = '演示账号'
+    authState.loading = false
+    return
+  }
+
+  authState.loading = true
+  try {
+    const response = await fetch('/api/auth/status/', { credentials: 'same-origin' })
+    const payload = await response.json()
+    authState.authenticated = Boolean(payload.authenticated)
+    authState.username = payload.username || ''
+    authState.isStaff = Boolean(payload.is_staff)
+    authState.mustChangePassword = Boolean(payload.must_change_password)
+    authState.csrfToken = payload.csrf_token || ''
+  } catch {
+    authState.error = '登录状态加载失败，请刷新页面。'
+  } finally {
+    authState.loading = false
+  }
+}
+
+async function loginForUploads() {
+  authState.error = ''
+  if (!authState.usernameInput || !authState.password) {
+    authState.error = '请输入账号和密码。'
+    return
+  }
+
+  authState.loading = true
+  try {
+    const response = await fetch('/api/auth/login/', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': authState.csrfToken,
+      },
+      body: JSON.stringify({ username: authState.usernameInput, password: authState.password }),
+    })
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) throw new Error(payload.error || '登录失败')
+    authState.authenticated = true
+    authState.username = payload.username
+    authState.isStaff = Boolean(payload.is_staff)
+    authState.mustChangePassword = Boolean(payload.must_change_password)
+    authState.csrfToken = payload.csrf_token || authState.csrfToken
+    authState.password = ''
+    if (authState.mustChangePassword) {
+      return
+    }
+    if (requiresWorkspaceAuth.value) {
+      await loadCurrentPrivatePage()
+    } else if (currentPage === 'agent') {
+      await Promise.all([loadCompaniesForAgent(), loadRecentAgentProjects()])
+    }
+  } catch (error) {
+    authState.error = error.message || '登录失败。'
+  } finally {
+    authState.loading = false
+  }
+}
+
+async function registerAccount() {
+  registrationState.error = ''
+  registrationState.message = ''
+  if (!registrationState.displayName || !registrationState.username || !registrationState.companyName || !registrationState.email) {
+    registrationState.error = '请完整填写联系人、账号、企业名称和工作邮箱。'
+    return
+  }
+  if (registrationState.password.length < 8) {
+    registrationState.error = '密码至少需要 8 位。'
+    return
+  }
+  if (registrationState.password !== registrationState.confirmPassword) {
+    registrationState.error = '两次输入的密码不一致。'
+    return
+  }
+  if (!registrationState.acceptedTerms) {
+    registrationState.error = '请先阅读并同意服务协议和隐私政策。'
+    return
+  }
+
+  registrationState.loading = true
+  try {
+    const response = await fetch('/api/auth/register/', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': authState.csrfToken,
+      },
+      body: JSON.stringify({
+        display_name: registrationState.displayName,
+        username: registrationState.username,
+        company_name: registrationState.companyName,
+        email: registrationState.email,
+        password: registrationState.password,
+        confirm_password: registrationState.confirmPassword,
+        accepted_terms: registrationState.acceptedTerms,
+      }),
+    })
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) throw new Error(payload.error || '账号创建失败')
+    registrationState.message = '账号创建成功，正在进入企业工作台...'
+    window.setTimeout(() => window.location.assign('/'), 500)
+  } catch (error) {
+    registrationState.error = error.message || '账号创建失败，请稍后重试。'
+  } finally {
+    registrationState.loading = false
+  }
+}
+
+async function changeCurrentPassword() {
+  passwordChangeState.error = ''
+  if (!passwordChangeState.currentPassword || !passwordChangeState.newPassword || !passwordChangeState.confirmPassword) {
+    passwordChangeState.error = '请完整填写三个密码字段。'
+    return
+  }
+  if (passwordChangeState.newPassword !== passwordChangeState.confirmPassword) {
+    passwordChangeState.error = '两次输入的新密码不一致。'
+    return
+  }
+
+  passwordChangeState.saving = true
+  try {
+    const response = await fetch('/api/auth/change-password/', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': authState.csrfToken,
+      },
+      body: JSON.stringify({
+        current_password: passwordChangeState.currentPassword,
+        new_password: passwordChangeState.newPassword,
+        confirm_password: passwordChangeState.confirmPassword,
+      }),
+    })
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) throw new Error(payload.error || '密码修改失败')
+
+    authState.mustChangePassword = false
+    authState.csrfToken = payload.csrf_token || authState.csrfToken
+    passwordChangeState.currentPassword = ''
+    passwordChangeState.newPassword = ''
+    passwordChangeState.confirmPassword = ''
+    if (requiresWorkspaceAuth.value) {
+      await loadCurrentPrivatePage()
+    } else if (currentPage === 'agent') {
+      await Promise.all([loadCompaniesForAgent(), loadRecentAgentProjects()])
+    }
+  } catch (error) {
+    passwordChangeState.error = error.message || '密码修改失败。'
+  } finally {
+    passwordChangeState.saving = false
+  }
+}
+
+async function logoutUploads() {
+  authState.error = ''
+  const response = await fetch('/api/auth/logout/', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'X-CSRFToken': authState.csrfToken },
+  })
+  const payload = await response.json()
+  authState.authenticated = false
+  authState.username = ''
+  authState.isStaff = false
+  authState.mustChangePassword = false
+  authState.csrfToken = payload.csrf_token || ''
+  companies.value = []
+  agentState.recentProjects = []
+  projectState.projects = []
+  projectDetailState.detail = null
+  reportState.detail = null
+  applyCompanyProfile(null)
+  accountAdminState.users = []
+  accountAdminState.companies = []
+}
+
+async function loadAccountAdministration() {
+  if (!authState.isStaff) return
+  accountAdminState.loading = true
+  accountAdminState.error = ''
+  try {
+    const response = await fetch('/api/admin/accounts/', { credentials: 'same-origin' })
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) throw new Error(payload.error || '账号数据加载失败')
+    accountAdminState.users = payload.users
+    accountAdminState.companies = payload.companies.map((company) => ({
+      ...company,
+      owner_id: company.owner_id || '',
+    }))
+  } catch (error) {
+    accountAdminState.error = error.message || '账号数据加载失败。'
+  } finally {
+    accountAdminState.loading = false
+  }
+}
+
+async function runAccountAdminAction(payload, successMessage) {
+  accountAdminState.saving = true
+  accountAdminState.error = ''
+  accountAdminState.message = ''
+  try {
+    const response = await fetch('/api/admin/accounts/', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': authState.csrfToken,
+      },
+      body: JSON.stringify(payload),
+    })
+    const result = await response.json()
+    if (!response.ok || !result.ok) throw new Error(result.error || '保存失败')
+    accountAdminState.users = result.users
+    accountAdminState.companies = result.companies.map((company) => ({
+      ...company,
+      owner_id: company.owner_id || '',
+    }))
+    accountAdminState.message = successMessage
+    return true
+  } catch (error) {
+    accountAdminState.error = error.message || '保存失败。'
+    return false
+  } finally {
+    accountAdminState.saving = false
+  }
+}
+
+async function createManagedUser() {
+  const created = await runAccountAdminAction({
+    action: 'create_user',
+    username: managedUserForm.username,
+    display_name: managedUserForm.displayName,
+    email: managedUserForm.email,
+    password: managedUserForm.password,
+  }, '普通账号已创建，可以继续分配企业。')
+  if (created) {
+    managedUserForm.username = ''
+    managedUserForm.displayName = ''
+    managedUserForm.email = ''
+    managedUserForm.password = ''
+  }
+}
+
+async function assignCompanyOwner(company) {
+  await runAccountAdminAction({
+    action: 'assign_company',
+    company_id: company.id,
+    user_id: company.owner_id || null,
+  }, `${company.name} 的所属账号已更新。`)
+}
+
+async function resetManagedPassword(user) {
+  const password = managedPasswords[user.id] || ''
+  const reset = await runAccountAdminAction({
+    action: 'reset_password',
+    user_id: user.id,
+    password,
+  }, `${user.username} 的密码已重置。`)
+  if (reset) managedPasswords[user.id] = ''
+}
+
+async function loadSystemStatus() {
+  systemState.loading = true
+  systemState.error = ''
+
+  try {
+    if (isStaticShowcase) {
+      systemState.analysis.mode = 'rule_based'
+      return
+    }
+    const response = await fetch('/api/system/status/')
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || '分析引擎状态加载失败')
+    }
+    Object.assign(systemState.analysis, payload.analysis)
+  } catch (error) {
+    systemState.error = error.message || '分析引擎状态加载失败'
+  } finally {
+    systemState.loading = false
+  }
+}
+
+function analysisEngineLabel(engine) {
+  const labels = {
+    openai: 'OpenAI 深度审查',
+    rule_based_fallback: '规则分析（OpenAI 已自动回退）',
+    agnes: 'Agnes AI 深度审查',
+    rule_based_agnes_fallback: '规则分析（Agnes AI 已自动回退）',
+    rule_based: '规则分析',
+  }
+  return labels[engine] || '规则分析'
+}
+
+function extractionMethodLabel(method) {
+  const labels = {
+    local_text: '本地文本提取',
+    local_text_limited: '本地文本提取（内容较少）',
+    openai_vision: '扫描件视觉识别',
+  }
+  return labels[method] || 'PDF 文本提取'
+}
+
+function storageBackendLabel(storage) {
+  if (storage?.backend === 'vercel_blob' && storage.persistent) return '私有云端永久保存'
+  if (storage?.persistent) return '服务器持久保存'
+  return '临时保存'
 }
 
 async function loadRecentAgentProjects() {
@@ -1504,6 +2788,7 @@ async function askReportQuestion(quickQuestion = '') {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-CSRFToken': authState.csrfToken,
       },
       body: JSON.stringify({ question }),
     })
@@ -1578,6 +2863,18 @@ async function loadProjectDetail() {
             created_at: '2026-06-27T11:00:00',
           },
         ],
+        tasks: demoReport.next_actions.map((title, index) => ({
+          id: index + 1,
+          title,
+          category: 'action',
+          category_label: '报告动作',
+          status: 'pending',
+          reminder_state: 'pending',
+          due_at: null,
+          assignee_name: '投标经理',
+          remind_at: null,
+        })),
+        available_assignees: ['投标经理', '演示账号'],
         workspace: {
           risk_count: demoReport.risks.length,
           material_count: demoReport.material_checklist.length,
@@ -1632,6 +2929,7 @@ async function updateProjectDetailStatus() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-CSRFToken': authState.csrfToken,
       },
       body: JSON.stringify({
         status: projectDetailState.pendingStatus,
@@ -1650,6 +2948,74 @@ async function updateProjectDetailStatus() {
   } finally {
     projectDetailState.updating = false
   }
+}
+
+async function updateProjectTaskStatus(task) {
+  projectDetailState.actionError = ''
+  projectDetailState.updatingTaskId = task.id
+  const nextStatus = task.status === 'completed' ? 'pending' : 'completed'
+
+  try {
+    if (isStaticShowcase) {
+      task.status = nextStatus
+      task.reminder_state = nextStatus === 'completed' ? 'completed' : 'pending'
+      return
+    }
+    const response = await fetch(`/api/project-tasks/${task.id}/status/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': authState.csrfToken,
+      },
+      body: JSON.stringify({ status: nextStatus }),
+    })
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || '任务状态更新失败')
+    }
+    const index = projectDetailState.detail.tasks.findIndex((item) => item.id === task.id)
+    if (index >= 0) projectDetailState.detail.tasks.splice(index, 1, payload.task)
+    await loadTaskNotifications()
+  } catch (error) {
+    projectDetailState.actionError = error.message || '任务状态更新失败'
+  } finally {
+    projectDetailState.updatingTaskId = null
+  }
+}
+
+async function saveProjectTaskSettings(task) {
+  projectDetailState.actionError = ''
+  projectDetailState.updatingTaskId = task.id
+  try {
+    if (isStaticShowcase) return
+    const response = await fetch(`/api/project-tasks/${task.id}/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': authState.csrfToken,
+      },
+      body: JSON.stringify({
+        assignee_name: task.assignee_name || '',
+        remind_at: task.remind_at_draft ?? toDateTimeInput(task.remind_at),
+      }),
+    })
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) throw new Error(payload.error || '任务设置保存失败')
+    const index = projectDetailState.detail.tasks.findIndex((item) => item.id === task.id)
+    if (index >= 0) projectDetailState.detail.tasks.splice(index, 1, payload.task)
+    await loadTaskNotifications()
+  } catch (error) {
+    projectDetailState.actionError = error.message || '任务设置保存失败'
+  } finally {
+    projectDetailState.updatingTaskId = null
+  }
+}
+
+function taskReminderLabel(task) {
+  if (task.status === 'completed') return '已完成'
+  if (task.reminder_state === 'overdue') return `已逾期 · ${formatDateTime(task.due_at)}`
+  if (task.reminder_state === 'due_soon') return `即将到期 · ${formatDateTime(task.due_at)}`
+  return task.due_at ? `计划 ${formatDateTime(task.due_at)}` : '待安排时间'
 }
 
 async function refreshProjectDetail() {
@@ -1690,6 +3056,7 @@ async function createProjectNote() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-CSRFToken': authState.csrfToken,
       },
       body: JSON.stringify(projectDetailState.noteForm),
     })
@@ -1720,6 +3087,7 @@ async function updateProjectStatus(project) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-CSRFToken': authState.csrfToken,
       },
       body: JSON.stringify({
         status: project.pendingStatus,
@@ -1837,6 +3205,7 @@ async function saveCompanyProfile() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-CSRFToken': authState.csrfToken,
       },
       body: JSON.stringify({
         ...companyForm,
@@ -1904,11 +3273,125 @@ function formatDateTime(value) {
   })
 }
 
+function toDateTimeInput(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  const offset = date.getTimezoneOffset() * 60_000
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16)
+}
+
+function firstLine(value) {
+  return String(value || '').split('\n').map((item) => item.trim()).find(Boolean) || ''
+}
+
+function contractTitle(contract) {
+  return firstLine(contract.basic_info) || `合同标书样本 ${contract.id}`
+}
+
+function contractTags(contract) {
+  return String(contract.risk_tags || '')
+    .replaceAll('，', '\n')
+    .replaceAll('、', '\n')
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 4)
+}
+
+function selectContractForReview(contractId) {
+  selectedContractId.value = contractId
+}
+
+function contractReviewScore(contract) {
+  const checks = [
+    contract.basic_info,
+    contract.tender_content,
+    contract.reference_points,
+    contract.scoring_rules,
+    contract.risk_tags,
+    contract.material_checklist,
+    contract.source_maintenance_info,
+  ]
+  return Math.round((checks.filter((value) => String(value || '').trim()).length / checks.length) * 100)
+}
+
+function contractReviewConclusion(contract) {
+  const score = contractReviewScore(contract)
+  const riskCount = contractTags(contract).length
+  if (score >= 90 && riskCount <= 3) {
+    return '资料较完整，可作为同类项目投标文件编制参考。'
+  }
+  if (score >= 70) {
+    return '可进入投标编制参考，但建议先复核风险标签和材料清单。'
+  }
+  return '信息不完整，建议补充评分规则、材料清单和来源维护信息后再使用。'
+}
+
 function decisionClass(decision) {
+  const normalizedDecision = {
+    推荐投标: 'recommended',
+    谨慎投标: 'cautious',
+    不建议投标: 'not_recommended',
+    人工复核: 'cautious',
+  }[decision] || decision
+
   return {
-    'decision-recommended': decision === 'recommended',
-    'decision-cautious': decision === 'cautious',
-    'decision-negative': decision === 'not_recommended',
+    'decision-recommended': normalizedDecision === 'recommended',
+    'decision-cautious': normalizedDecision === 'cautious',
+    'decision-negative': normalizedDecision === 'not_recommended',
+  }
+}
+
+function normalizedRiskLevel(level) {
+  const value = String(level || '').trim()
+  if (value.includes('高')) return 'high'
+  if (value.includes('中')) return 'medium'
+  return 'low'
+}
+
+function prioritizedRisks(risks = []) {
+  const priority = { high: 0, medium: 1, low: 2 }
+  return [...(risks || [])].sort(
+    (left, right) => priority[normalizedRiskLevel(left.level)] - priority[normalizedRiskLevel(right.level)],
+  )
+}
+
+function riskPriorityClass(level) {
+  return `risk-priority-${normalizedRiskLevel(level)}`
+}
+
+function riskPriorityLabel(level) {
+  const labels = {
+    high: 'P0 · 立即处理',
+    medium: 'P1 · 重点关注',
+    low: 'P2 · 持续跟踪',
+  }
+  return labels[normalizedRiskLevel(level)]
+}
+
+function riskTitle(risk = {}) {
+  return risk.type || risk.title || '风险提示'
+}
+
+function buildDecisionSummary(report = {}, workspace = {}) {
+  const decision = report?.decision || ''
+  const risks = report?.risks?.length ? report.risks : workspace?.risks || []
+  const missingMaterials = report?.missing_materials?.length
+    ? report.missing_materials
+    : workspace?.missing_materials || []
+  const guidance = {
+    recommended: '建议进入报名与投标准备，优先锁定关键资质、核心人员和交付资源。',
+    cautious: '建议先完成风险复核与材料补齐，再由负责人确认是否投入投标准备。',
+    not_recommended: '当前投入产出或合规风险不理想，建议暂停推进并记录放弃原因。',
+  }
+
+  return {
+    tone: decision || 'pending',
+    label: report?.decision_label || '待完成分析',
+    guidance: guidance[decision] || '完成项目分析后，系统会在这里给出明确的投标行动建议。',
+    score: report?.match_score ?? '-',
+    highRiskCount: risks.filter((risk) => normalizedRiskLevel(risk.level) === 'high').length,
+    missingMaterialCount: missingMaterials.length,
   }
 }
 
@@ -1920,12 +3403,52 @@ function riskClass(level) {
   }
 }
 
+function materialStatusLabel(status) {
+  const labels = {
+    missing: '缺失',
+    required: '需准备',
+    ready: '已具备',
+  }
+  return labels[status] || status || '待确认'
+}
+
+function qualificationStatusLabel(status) {
+  const labels = {
+    matched: '完全匹配',
+    complete: '完全匹配',
+    full: '完全匹配',
+    partial: '部分匹配',
+    missing: '存在缺口',
+    not_matched: '不匹配',
+  }
+  return labels[status] || status || '待确认'
+}
+
+function agentStepName(step) {
+  if (typeof step === 'string') return step
+  return step?.agent || step?.name || '分析步骤'
+}
+
+function agentStatusLabel(step) {
+  if (typeof step === 'string') return '已完成'
+  const labels = {
+    completed: '已完成',
+    complete: '已完成',
+    running: '执行中',
+    pending: '等待中',
+    failed: '执行失败',
+  }
+  return labels[step?.status] || step?.status || '已完成'
+}
+
 async function runAgentAnalysis() {
   agentState.error = ''
   agentState.report = null
   agentState.projectId = null
   agentState.reportId = null
   agentState.documentId = null
+  agentState.extraction = null
+  agentState.storage = null
 
   if (!agentForm.companyId) {
     agentState.error = '请先选择企业档案。'
@@ -1940,6 +3463,7 @@ async function runAgentAnalysis() {
   try {
     if (isStaticShowcase) {
       agentState.report = {
+        analysis_engine: agentForm.analysisMode === 'rule_based' ? 'rule_based' : agentForm.analysisMode,
         project_name: demoReport.project.name,
         decision: demoReport.decision_label,
         decision_reason: demoReport.summary,
@@ -1958,10 +3482,12 @@ async function runAgentAnalysis() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-CSRFToken': authState.csrfToken,
       },
       body: JSON.stringify({
         tender_text: agentForm.tenderText,
         company_id: agentForm.companyId,
+        analysis_mode: agentForm.analysisMode,
         save: true,
       }),
     })
@@ -1987,6 +3513,10 @@ async function runPdfAnalysis() {
   agentState.projectId = null
   agentState.reportId = null
   agentState.documentId = null
+  agentState.extraction = null
+  agentState.storage = null
+  agentState.uploadProgress = 0
+  agentState.uploadStage = ''
 
   if (!agentForm.companyId) {
     agentState.error = '请先选择企业档案。'
@@ -1996,15 +3526,25 @@ async function runPdfAnalysis() {
     agentState.error = '请先上传 PDF 文件。'
     return
   }
+  if (!authState.authenticated) {
+    agentState.error = '请先登录后再上传 PDF。'
+    return
+  }
+  if (agentForm.pdfFile.size > 50 * 1024 * 1024) {
+    agentState.error = 'PDF 文件不能超过 50 MB。'
+    return
+  }
 
   const formData = new FormData()
   formData.append('company_id', agentForm.companyId)
+  formData.append('analysis_mode', agentForm.analysisMode)
   formData.append('pdf_file', agentForm.pdfFile)
 
   agentState.loading = true
   try {
     if (isStaticShowcase) {
       agentState.report = {
+        analysis_engine: agentForm.analysisMode === 'rule_based' ? 'rule_based' : agentForm.analysisMode,
         project_name: demoReport.project.name,
         decision: demoReport.decision_label,
         decision_reason: demoReport.summary,
@@ -2017,13 +3557,57 @@ async function runPdfAnalysis() {
       agentState.projectId = demoReport.project.id
       agentState.reportId = demoReport.id
       agentState.documentId = 1
+      agentState.extraction = {
+        method: 'local_text',
+        character_count: 860,
+        used_vision: false,
+        warning: '',
+      }
+      agentState.storage = {
+        backend: 'vercel_blob',
+        persistent: true,
+        warning: '',
+      }
       await loadRecentAgentProjects()
       return
     }
-    const response = await fetch('/api/agent/analyze-pdf/', {
-      method: 'POST',
-      body: formData,
-    })
+    let response
+    if (agentForm.pdfFile.size > 4 * 1024 * 1024) {
+      agentState.uploadStage = '正在上传到私有云存储'
+      const blob = await upload(buildClientPdfPath(agentForm.pdfFile.name), agentForm.pdfFile, {
+        access: 'private',
+        handleUploadUrl: '/api/blob-upload',
+        clientPayload: JSON.stringify({ companyId: agentForm.companyId }),
+        multipart: true,
+        onUploadProgress: ({ percentage }) => {
+          agentState.uploadProgress = Math.round(percentage)
+        },
+      })
+      agentState.uploadProgress = 100
+      agentState.uploadStage = '上传完成，正在解析和分析'
+      response = await fetch('/api/agent/analyze-blob/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': authState.csrfToken,
+        },
+        body: JSON.stringify({
+          company_id: agentForm.companyId,
+          analysis_mode: agentForm.analysisMode,
+          pathname: blob.pathname,
+          original_name: agentForm.pdfFile.name,
+        }),
+      })
+    } else {
+      agentState.uploadStage = '正在上传并分析'
+      agentState.uploadProgress = 20
+      response = await fetch('/api/agent/analyze-pdf/', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': authState.csrfToken },
+        body: formData,
+      })
+      agentState.uploadProgress = 100
+    }
     const payload = await response.json()
     if (!response.ok || !payload.ok) {
       throw new Error(payload.error || 'PDF分析失败')
@@ -2032,12 +3616,20 @@ async function runPdfAnalysis() {
     agentState.projectId = payload.project_id
     agentState.reportId = payload.report_id
     agentState.documentId = payload.document_id
+    agentState.extraction = payload.extraction || null
+    agentState.storage = payload.storage || null
     await loadRecentAgentProjects()
   } catch (error) {
     agentState.error = error.message || 'PDF分析失败，请确认文件是否为文本型 PDF。'
   } finally {
     agentState.loading = false
+    agentState.uploadStage = ''
   }
+}
+
+function buildClientPdfPath(fileName) {
+  const stem = fileName.replace(/\.pdf$/i, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+  return `client-tender-documents/${Date.now()}-${stem || 'tender'}.pdf`
 }
 
 const features = [

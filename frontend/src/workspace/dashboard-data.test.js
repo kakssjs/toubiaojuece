@@ -80,3 +80,12 @@ test('buildRiskReminders keeps only actionable alerts', () => {
   assert.match(reminders[0].title, /高风险项目/)
   assert.match(reminders[1].title, /待跟进/)
 })
+
+test('buildRiskReminders prioritizes overdue report tasks', () => {
+  const reminders = buildRiskReminders([
+    { ...projects[0], pending_task_count: 3, overdue_task_count: 2 },
+  ])
+
+  assert.match(reminders[0].title, /2 项任务已逾期/)
+  assert.match(reminders[0].description, /保证金/)
+})

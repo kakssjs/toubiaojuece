@@ -236,6 +236,9 @@ class ProjectDashboardApiTests(TestCase):
                 "experience_match": {"score": 80, "summary": "存在类似项目经验", "matched_cases": ["智慧园区平台建设项目"]},
                 "material_checklist": [{"category": "商务材料", "name": "投标保证金缴纳凭证", "status": "required"}],
                 "agent_trace": [{"agent": "投标决策Agent", "status": "completed"}],
+                "review_summary": {"review_level": "需复核", "average_dimension_score": 76},
+                "scoring_breakdown": [{"dimension": "资质匹配", "score": 76, "weight": "35%", "comment": "需补材料"}],
+                "key_findings": ["缺少原厂授权函"],
             },
         )
 
@@ -252,12 +255,36 @@ class ProjectDashboardApiTests(TestCase):
         self.assertEqual(payload["workspace"]["material_count"], 1)
         self.assertEqual(payload["workspace"]["next_actions"][0], "确认原厂授权")
         self.assertEqual(payload["workspace"]["agent_trace"][0]["agent"], "投标决策Agent")
+        self.assertEqual(payload["workspace"]["review_summary"]["review_level"], "需复核")
+        self.assertEqual(payload["workspace"]["scoring_breakdown"][0]["dimension"], "资质匹配")
+        self.assertEqual(payload["workspace"]["key_findings"][0], "缺少原厂授权函")
 
     def test_project_detail_api_returns_404_for_missing_project(self):
         response = self.client.get("/api/projects/99999/")
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["ok"], False)
+
+    def test_project_detail_api_enriches_legacy_workspace_sections(self):
+        company = CompanyProfile.objects.create(name="历史项目企业")
+        project = TenderProject.objects.create(company=company, name="历史项目")
+        AnalysisReport.objects.create(
+            tender_project=project,
+            decision=AnalysisReport.Decision.RECOMMENDED,
+            match_score=88,
+            risks=[{"type": "材料风险", "level": "中", "description": "材料待复核"}],
+            missing_materials=[],
+            raw_report={},
+        )
+
+        response = self.client.get(f"/api/projects/{project.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        workspace = response.json()["workspace"]
+        self.assertEqual(workspace["review_summary"]["review_level"], "可推进")
+        self.assertEqual(workspace["review_summary"]["material_status"], "材料齐备")
+        self.assertEqual(len(workspace["scoring_breakdown"]), 4)
+        self.assertIn("推荐投标", workspace["key_findings"][0])
 
 
 class TenderReferenceApiTests(TestCase):

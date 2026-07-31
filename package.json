@@ -2,5 +2,8 @@
   "private": true,
   "scripts": {
     "vercel-build": "python build.py"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.6.1"
   }
 }

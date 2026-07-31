@@ -1,6 +1,8 @@
 from io import BytesIO
+from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from pypdf import PdfWriter
 
@@ -20,6 +22,13 @@ def make_sample_pdf(text):
 
 @override_settings(MEDIA_ROOT='D:/2/tmp-test-media')
 class TenderPdfAnalysisApiTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username='pdf-user',
+            password='test-password',
+        )
+        self.client.force_login(self.user)
+
     def test_analyze_pdf_api_extracts_and_saves_document_project_and_report(self):
         company = CompanyProfile.objects.create(
             name="小苏科技",
@@ -32,7 +41,7 @@ class TenderPdfAnalysisApiTests(TestCase):
 
         pdf_file = SimpleUploadedFile(
             "sample-tender.pdf",
-            make_sample_pdf("sample tender"),
+            make_sample_pdf("sample tender content " * 20),
             content_type="application/pdf",
         )
 
@@ -50,6 +59,13 @@ class TenderPdfAnalysisApiTests(TestCase):
         self.assertIsNotNone(payload["project_id"])
         self.assertIsNotNone(payload["document_id"])
         self.assertIsNotNone(payload["report_id"])
+        self.assertIn("review_summary", payload["report"])
+        self.assertIn("scoring_breakdown", payload["report"])
+        self.assertIn("extraction", payload)
+        self.assertEqual(payload["extraction"]["method"], "local_text")
+        self.assertGreater(payload["extraction"]["character_count"], 0)
+        self.assertEqual(payload["storage"]["backend"], "local")
+        self.assertTrue(payload["storage"]["persistent"])
 
         project = TenderProject.objects.get(id=payload["project_id"])
         document = TenderDocument.objects.get(id=payload["document_id"])
@@ -71,3 +87,21 @@ class TenderPdfAnalysisApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["ok"], False)
+
+    def test_analyze_pdf_api_cleans_up_project_when_file_storage_fails(self):
+        company = CompanyProfile.objects.create(name="测试企业")
+        pdf_file = SimpleUploadedFile(
+            "storage-error.pdf",
+            make_sample_pdf("storage error"),
+            content_type="application/pdf",
+        )
+
+        with patch("tenders.views.TenderDocument.objects.create", side_effect=OSError("read only")):
+            response = self.client.post(
+                "/api/agent/analyze-pdf/",
+                data={"company_id": company.id, "pdf_file": pdf_file},
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["ok"], False)
+        self.assertEqual(TenderProject.objects.filter(name="storage-error").count(), 0)

@@ -1,11 +1,20 @@
 import json
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from tenders.models import Contract
 
 
 class ContractCreateApiTests(TestCase):
+    def setUp(self):
+        self.staff = get_user_model().objects.create_user(
+            username='contract-create-admin',
+            password='Contract-create-2026',
+            is_staff=True,
+        )
+        self.client.force_login(self.staff)
+
     def test_vue_frontend_can_create_contract_with_json(self):
         response = self.client.post(
             '/api/contracts/',

@@ -1,11 +1,20 @@
 import json
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from tenders.models import Contract
 
 
 class ContractApiTests(TestCase):
+    def setUp(self):
+        self.staff = get_user_model().objects.create_user(
+            username='contract-admin',
+            password='Contract-admin-2026',
+            is_staff=True,
+        )
+        self.client.force_login(self.staff)
+
     def test_contracts_api_returns_seeded_rows(self):
         response = self.client.get('/api/contracts/')
 
@@ -63,6 +72,34 @@ class ContractApiTests(TestCase):
         delete = self.client.delete(f'/api/contracts/{contract.id}/')
         self.assertEqual(delete.status_code, 200)
         self.assertFalse(Contract.objects.filter(id=contract.id).exists())
+
+    def test_contract_write_requires_staff_account(self):
+        regular_user = get_user_model().objects.create_user(
+            username='contract-viewer',
+            password='Contract-viewer-2026',
+        )
+        self.client.force_login(regular_user)
+
+        response = self.client.post(
+            '/api/contracts/',
+            data=json.dumps({'basic_info': '无权创建的合同'}, ensure_ascii=False),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Contract.objects.filter(basic_info='无权创建的合同').exists())
+
+    def test_contract_write_requires_authentication(self):
+        self.client.logout()
+
+        response = self.client.post(
+            '/api/contracts/',
+            data=json.dumps({'basic_info': '匿名创建的合同'}, ensure_ascii=False),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(Contract.objects.filter(basic_info='匿名创建的合同').exists())
 
 
 class ContractPageTests(TestCase):

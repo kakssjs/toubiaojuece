@@ -2,6 +2,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import importlib.util
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -19,7 +20,9 @@ def main():
 
     run([npm_command, "ci", "--prefix", str(FRONTEND_DIR)])
     run([npm_command, "run", "build", "--prefix", str(FRONTEND_DIR)])
-    run([sys.executable, "manage.py", "collectstatic", "--noinput"])
+    if importlib.util.find_spec("django") is not None:
+        run([sys.executable, "manage.py", "migrate", "--noinput"])
+        run([sys.executable, "manage.py", "collectstatic", "--noinput"])
 
 
 if __name__ == "__main__":

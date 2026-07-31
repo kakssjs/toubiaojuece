@@ -1,7 +1,37 @@
+from django.conf import settings
 from django.db import models
 
 
+class UserSecurityProfile(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        verbose_name='账号',
+        related_name='security_profile',
+        on_delete=models.CASCADE,
+    )
+    must_change_password = models.BooleanField('必须修改密码', default=False)
+    password_changed_at = models.DateTimeField('密码修改时间', null=True, blank=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        verbose_name = '账号安全状态'
+        verbose_name_plural = '账号安全状态'
+
+    def __str__(self):
+        return self.user.get_username()
+
+
 class CompanyProfile(models.Model):
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name='所属账号',
+        related_name='company_profiles',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_constraint=False,
+        db_index=False,
+    )
     name = models.CharField('企业名称', max_length=120)
     main_business = models.TextField('主营业务', blank=True)
     service_regions = models.CharField('服务地区', max_length=255, blank=True)
@@ -203,6 +233,56 @@ class ProjectNote(models.Model):
 
     def __str__(self):
         return f'{self.tender_project} - {self.get_note_type_display()}'
+
+
+class ProjectTask(models.Model):
+    class Category(models.TextChoices):
+        ACTION = 'action', '报告动作'
+        MATERIAL = 'material', '材料补齐'
+        GUARANTEE = 'guarantee', '保证金'
+        DEADLINE = 'deadline', '截止时间'
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', '待处理'
+        COMPLETED = 'completed', '已完成'
+
+    tender_project = models.ForeignKey(
+        TenderProject,
+        verbose_name='招标项目',
+        related_name='tasks',
+        on_delete=models.CASCADE,
+    )
+    analysis_report = models.ForeignKey(
+        'AnalysisReport',
+        verbose_name='来源报告',
+        related_name='generated_tasks',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    title = models.CharField('任务标题', max_length=255)
+    category = models.CharField('任务分类', max_length=32, choices=Category.choices, default=Category.ACTION)
+    status = models.CharField('任务状态', max_length=24, choices=Status.choices, default=Status.PENDING)
+    due_at = models.DateTimeField('计划完成时间', null=True, blank=True)
+    assignee_name = models.CharField('负责人', max_length=80, blank=True)
+    remind_at = models.DateTimeField('提醒时间', null=True, blank=True)
+    reminder_read_at = models.DateTimeField('提醒已读时间', null=True, blank=True)
+    source_key = models.CharField('自动任务标识', max_length=64)
+    is_auto_generated = models.BooleanField('报告自动生成', default=True)
+    completed_at = models.DateTimeField('完成时间', null=True, blank=True)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        verbose_name = '项目任务'
+        verbose_name_plural = '项目任务'
+        ordering = ['status', 'due_at', 'created_at']
+        constraints = [
+            models.UniqueConstraint(fields=['tender_project', 'source_key'], name='unique_project_auto_task'),
+        ]
+
+    def __str__(self):
+        return f'{self.tender_project} - {self.title}'
 
 
 class AnalysisReport(models.Model):

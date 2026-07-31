@@ -4,7 +4,7 @@ Django settings for bid_agent project.
 
 import os
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -26,7 +26,10 @@ def env_list(name, default=None):
 
 
 def build_database_config():
-    database_url = os.getenv("DATABASE_URL", "").strip()
+    # MYSQL_DATABASE_URL takes precedence during a zero-downtime migration
+    # while DATABASE_URL may still point at the previous PostgreSQL database.
+    database_url = os.getenv("MYSQL_DATABASE_URL", "").strip()
+    database_url = database_url or os.getenv("DATABASE_URL", "").strip()
     if not database_url:
         if os.getenv("VERCEL"):
             raise RuntimeError("DATABASE_URL is required when deploying to Vercel.")
@@ -49,12 +52,39 @@ def build_database_config():
         return {
             "default": {
                 "ENGINE": "django.db.backends.postgresql",
-                "NAME": parsed.path.lstrip("/"),
-                "USER": parsed.username or "",
-                "PASSWORD": parsed.password or "",
+                "NAME": unquote(parsed.path.lstrip("/")),
+                "USER": unquote(parsed.username or ""),
+                "PASSWORD": unquote(parsed.password or ""),
                 "HOST": parsed.hostname or "",
                 "PORT": str(parsed.port or ""),
                 "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "600")),
+                "OPTIONS": options,
+            }
+        }
+
+    if scheme in {"mysql", "mysql+pymysql"}:
+        query = parse_qs(parsed.query)
+        options = {
+            "charset": query.get("charset", ["utf8mb4"])[-1],
+            "init_command": "SET sql_mode='STRICT_TRANS_TABLES'",
+        }
+
+        ssl_ca = query.get("ssl_ca", [""])[-1]
+        ssl_mode = query.get("sslmode", query.get("ssl-mode", [""]))[-1]
+        if ssl_ca:
+            options["ssl"] = {"ca": ssl_ca}
+        elif ssl_mode.lower() in {"require", "required", "verify_ca", "verify_identity"}:
+            options["ssl"] = {}
+
+        return {
+            "default": {
+                "ENGINE": "django.db.backends.mysql",
+                "NAME": unquote(parsed.path.lstrip("/")),
+                "USER": unquote(parsed.username or ""),
+                "PASSWORD": unquote(parsed.password or ""),
+                "HOST": parsed.hostname or "",
+                "PORT": str(parsed.port or 3306),
+                "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "0")),
                 "OPTIONS": options,
             }
         }
@@ -73,6 +103,8 @@ def build_database_config():
 
 VERCEL_URL = os.getenv("VERCEL_URL", "").strip()
 DEBUG = env_flag("DEBUG", default=not os.getenv("VERCEL"))
+AUTO_SEED_DEMO_DATA = env_flag("AUTO_SEED_DEMO_DATA", default=bool(os.getenv("VERCEL")))
+DATA_ACCESS_CONTROL_ENABLED = env_flag("DATA_ACCESS_CONTROL_ENABLED", default=bool(os.getenv("VERCEL")))
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-local-dev-key")
 
 allowed_hosts = {"127.0.0.1", "localhost"}
@@ -104,6 +136,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "tenders.middleware.PasswordChangeRequiredMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -156,12 +189,27 @@ STATIC_URL = "/static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_ROOT = Path("/tmp/media") if os.getenv("VERCEL") else BASE_DIR / "media"
+if os.getenv("VERCEL"):
+    FILE_UPLOAD_TEMP_DIR = Path("/tmp")
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = "Lax"
+# SimpleUI loads Django admin pages in a same-origin frame. Keep external
+# framing blocked while allowing the administration shell to render its pages.
+X_FRAME_OPTIONS = "SAMEORIGIN"
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
+SECURE_SSL_REDIRECT = not DEBUG
+SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "3600")) if not DEBUG else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+SECURE_HSTS_PRELOAD = False
 
 
 SIMPLEUI_HOME_TITLE = "AI 招投标 Agent 后台"

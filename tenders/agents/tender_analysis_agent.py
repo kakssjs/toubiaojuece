@@ -19,6 +19,8 @@ class TenderAnalysisAgent:
         risks = self._identify_risks(text, qualification_match, company_profile)
         decision = self._make_decision(qualification_match, experience_match, risks, classification)
         material_checklist = self._build_material_checklist(text, qualification_match)
+        scoring_breakdown = self._build_scoring_breakdown(qualification_match, experience_match, risks, classification)
+        review_summary = self._build_review_summary(decision, material_checklist, risks, scoring_breakdown)
 
         return {
             "project_name": extracted["project_name"],
@@ -26,6 +28,8 @@ class TenderAnalysisAgent:
             "project_type": classification["project_type"],
             "industry_type": classification["industry_type"],
             "budget_amount": extracted["budget_amount"],
+            "highest_limit_amount": extracted["highest_limit_amount"],
+            "region": extracted["region"],
             "deadline": extracted["deadline"],
             "match_score": decision["match_score"],
             "decision": decision["decision"],
@@ -34,6 +38,9 @@ class TenderAnalysisAgent:
             "experience_match": experience_match,
             "risks": risks,
             "material_checklist": material_checklist,
+            "scoring_breakdown": scoring_breakdown,
+            "review_summary": review_summary,
+            "key_findings": self._build_key_findings(qualification_match, experience_match, risks),
             "next_actions": decision["next_actions"],
             "agent_trace": [
                 {"agent": "信息抽取Agent", "status": "completed"},
@@ -54,23 +61,78 @@ class TenderAnalysisAgent:
         if project_match:
             project_name = project_match.group(1)
 
-        budget_amount = None
-        budget_match = re.search(r"(?:预算金额|最高限价|预算)[^\d]*(\d+(?:\.\d+)?)\s*(万元|万|元)", text)
-        if budget_match:
-            amount = float(budget_match.group(1))
-            unit = budget_match.group(2)
-            budget_amount = int(amount * 10000) if unit in {"万元", "万"} else int(amount)
+        budget_amount = self._extract_amount(text, ("项目预算", "预算金额", "采购预算", "预算"))
+        highest_limit_amount = self._extract_amount(text, ("最高限价", "最高投标限价"))
+        if budget_amount is None:
+            budget_amount = highest_limit_amount
 
-        deadline = None
-        deadline_match = re.search(r"(?:投标截止时间|截止时间)[^0-9]*(\d{4}年\d{1,2}月\d{1,2}日\s*\d{1,2}[:：]\d{2})", text)
-        if deadline_match:
-            deadline = deadline_match.group(1).replace(" ", "")
+        region = self._extract_region(text)
+        deadline = self._extract_deadline(text)
 
         return {
             "project_name": project_name,
             "budget_amount": budget_amount,
+            "highest_limit_amount": highest_limit_amount,
+            "region": region,
             "deadline": deadline,
         }
+
+    def _extract_amount(self, text, labels):
+        label_pattern = "|".join(re.escape(label) for label in labels)
+        match = re.search(
+            rf"(?:{label_pattern})\s*(?:为|是)?\s*[:：]?\s*(?:人民币\s*)?"
+            rf"([0-9][0-9,，]*(?:\.[0-9]+)?)\s*(亿元|亿|万元|万|元)",
+            text,
+        )
+        if not match:
+            return None
+        amount = float(match.group(1).replace(",", "").replace("，", ""))
+        multiplier = {
+            "元": 1,
+            "万": 10_000,
+            "万元": 10_000,
+            "亿": 100_000_000,
+            "亿元": 100_000_000,
+        }[match.group(2)]
+        return int(amount * multiplier)
+
+    def _extract_region(self, text):
+        match = re.search(
+            r"(?:建设地点|项目地点|实施地点|服务地点|项目地区|所在地区)"
+            r"\s*(?:为|是)?\s*[:：]?\s*([^\s，,。；;]{2,40})",
+            text,
+        )
+        if not match:
+            return None
+        location = match.group(1).strip("：:")
+        province_names = (
+            "北京", "天津", "上海", "重庆", "河北", "山西", "辽宁", "吉林", "黑龙江",
+            "江苏", "浙江", "安徽", "福建", "江西", "山东", "河南", "湖北", "湖南", "广东",
+            "海南", "四川", "贵州", "云南", "陕西", "甘肃", "青海", "台湾", "内蒙古",
+            "广西", "西藏", "宁夏", "新疆", "香港", "澳门",
+        )
+        return next((province for province in province_names if province in location), location)
+
+    def _extract_deadline(self, text):
+        label = r"(?:投标截止时间|响应文件提交截止时间|报名截止时间|截止时间)"
+        chinese_match = re.search(
+            label + r"\s*(?:为|是)?\s*[:：]?\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日"
+            r"(?:\s*(\d{1,2})\s*[:：]\s*(\d{2}))?",
+            text,
+        )
+        if chinese_match:
+            year, month, day, hour, minute = chinese_match.groups()
+            return f"{year}-{int(month):02d}-{int(day):02d} {int(hour or 0):02d}:{int(minute or 0):02d}"
+
+        numeric_match = re.search(
+            label + r"\s*(?:为|是)?\s*[:：]?\s*(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})"
+            r"(?:\s*(\d{1,2})\s*[:：]\s*(\d{2}))?",
+            text,
+        )
+        if numeric_match:
+            year, month, day, hour, minute = numeric_match.groups()
+            return f"{year}-{int(month):02d}-{int(day):02d} {int(hour or 0):02d}:{int(minute or 0):02d}"
+        return None
 
     def _classify_tender(self, text):
         procurement_method = "未识别"
@@ -104,10 +166,11 @@ class TenderAnalysisAgent:
 
     def _match_qualifications(self, text, company_profile):
         required = self._find_required_qualifications(text)
-        owned = set(company_profile.get("qualifications", []))
+        owned = list(company_profile.get("qualifications", []))
 
-        matched = [item for item in required if item in owned]
+        matched = [item for item in required if any(self._qualifications_equivalent(item, value) for value in owned)]
         missing = [item for item in required if item not in owned]
+        missing = [item for item in missing if item not in matched]
 
         if not required:
             status = "unknown"
@@ -128,15 +191,33 @@ class TenderAnalysisAgent:
         }
 
     def _find_required_qualifications(self, text):
+        compact_text = re.sub(r"\s+", "", text)
         known_qualifications = [
             "CMMI三级认证",
             "CMMI认证",
             "ISO9001质量管理体系认证",
+            "信息安全管理体系认证",
+            "ISO27001信息安全管理体系认证",
             "软件企业认证",
             "原厂授权函",
             "电子与智能化工程专业承包二级",
         ]
-        return [item for item in known_qualifications if item in text]
+        return [item for item in known_qualifications if item in compact_text]
+
+    def _qualifications_equivalent(self, required, owned):
+        required_key = re.sub(r"[\s认证证书能力软件]", "", str(required)).lower()
+        owned_key = re.sub(r"[\s认证证书能力软件]", "", str(owned)).lower()
+        if required_key in owned_key or owned_key in required_key:
+            return True
+        if required.startswith("CMMI三级") and owned.startswith("CMMI三级"):
+            return True
+        if "ISO9001" in required.upper() and "ISO9001" in owned.upper():
+            return True
+        if ("信息安全管理体系" in required or "ISO27001" in required.upper()) and (
+            "信息安全管理体系" in owned or "ISO27001" in owned.upper()
+        ):
+            return True
+        return False
 
     def _match_experiences(self, text, company_profile):
         experiences = company_profile.get("project_experiences", [])
@@ -144,7 +225,7 @@ class TenderAnalysisAgent:
         matched_cases = []
 
         for case in experiences:
-            if any(keyword in text for keyword in self._split_keywords(case)):
+            if any(keyword in text for keyword in self._experience_keywords(case)):
                 matched_cases.append(case)
 
         if not matched_cases:
@@ -162,6 +243,15 @@ class TenderAnalysisAgent:
 
     def _split_keywords(self, value):
         return [part for part in re.split(r"[\s、,，\-]+", str(value)) if len(part) >= 2]
+
+    def _experience_keywords(self, value):
+        text = str(value or "")
+        domain_keywords = (
+            "智慧园区", "数字化平台", "数据中台", "数据驾驶舱", "智能客服",
+            "知识库", "政务平台", "系统集成", "物联网", "云平台", "网络安全",
+        )
+        matches = [keyword for keyword in domain_keywords if keyword in text]
+        return matches or self._split_keywords(text)
 
     def _identify_risks(self, text, qualification_match, company_profile):
         risks = []
@@ -264,4 +354,87 @@ class TenderAnalysisAgent:
         if "评分标准" in text:
             checklist.append({"category": "技术材料", "name": "技术方案与评分响应表", "status": "required"})
 
+        default_items = [
+            {"category": "主体材料", "name": "营业执照及法定代表人授权书", "status": "required"},
+            {"category": "商务材料", "name": "报价明细表与服务承诺函", "status": "required"},
+            {"category": "技术材料", "name": "技术/实施方案响应文件", "status": "required"},
+        ]
+        existing_names = {item["name"] for item in checklist}
+        for item in default_items:
+            if item["name"] not in existing_names:
+                checklist.append(item)
+
         return checklist
+
+    def _build_scoring_breakdown(self, qualification_match, experience_match, risks, classification):
+        risk_score = max(0, 100 - sum(24 if risk["level"] == "高" else 14 if risk["level"] == "中" else 6 for risk in risks))
+        technical_score = 82 if classification["project_type"] in {"软件信息化", "服务采购"} else 72
+        business_score = round((qualification_match["score"] * 0.65) + (experience_match["score"] * 0.35))
+        return [
+            {
+                "dimension": "资质匹配",
+                "score": qualification_match["score"],
+                "weight": "35%",
+                "comment": "根据企业资质证书与招标资格要求匹配情况计算。",
+            },
+            {
+                "dimension": "业绩支撑",
+                "score": experience_match["score"],
+                "weight": "25%",
+                "comment": experience_match["summary"],
+            },
+            {
+                "dimension": "风险可控",
+                "score": risk_score,
+                "weight": "25%",
+                "comment": "根据高、中、低风险数量和影响程度扣分。",
+            },
+            {
+                "dimension": "技术响应",
+                "score": technical_score,
+                "weight": "15%",
+                "comment": f"项目类型识别为{classification['project_type']}，按常规响应难度估算。",
+            },
+            {
+                "dimension": "商务完整性",
+                "score": business_score,
+                "weight": "参考",
+                "comment": "综合资质和业绩基础，提示商务响应准备完整度。",
+            },
+        ]
+
+    def _build_review_summary(self, decision, material_checklist, risks, scoring_breakdown):
+        missing_count = sum(1 for item in material_checklist if item.get("status") == "missing")
+        required_count = len(material_checklist)
+        high_risk_count = sum(1 for risk in risks if risk["level"] == "高")
+        average_dimension_score = round(sum(item["score"] for item in scoring_breakdown[:4]) / 4)
+        if missing_count == 0:
+            material_status = "材料基础较完整"
+        elif missing_count <= 2:
+            material_status = "存在少量材料缺口"
+        else:
+            material_status = "材料缺口较多"
+
+        return {
+            "conclusion": decision["decision_reason"],
+            "material_status": material_status,
+            "material_required_count": required_count,
+            "material_missing_count": missing_count,
+            "high_risk_count": high_risk_count,
+            "average_dimension_score": average_dimension_score,
+            "review_level": "可推进" if decision["decision"] == "推荐投标" else "需复核" if decision["decision"] == "谨慎投标" else "暂缓",
+        }
+
+    def _build_key_findings(self, qualification_match, experience_match, risks):
+        findings = []
+        if qualification_match["matched"]:
+            findings.append(f"已匹配资质：{'、'.join(qualification_match['matched'][:3])}")
+        if qualification_match["missing"]:
+            findings.append(f"待补材料：{'、'.join(qualification_match['missing'][:3])}")
+        findings.append(experience_match["summary"])
+        high_risks = [risk["type"] for risk in risks if risk["level"] == "高"]
+        if high_risks:
+            findings.append(f"高风险项：{'、'.join(high_risks[:3])}")
+        elif risks:
+            findings.append("未发现必须立即中止投标的高风险项。")
+        return findings

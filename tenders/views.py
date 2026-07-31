@@ -1,37 +1,470 @@
 ﻿import json
+import os
+import tempfile
+import hashlib
+import re
 from html import escape
-from datetime import datetime
+from io import BytesIO
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from django.conf import settings
+from django.contrib.auth import authenticate, login as auth_login, logout as auth_logout, update_session_auth_hash
+from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.core.cache import cache
+from django.core.exceptions import ValidationError
+from django.core.management import call_command
+from django.db import connection, transaction
+from django.db.models import Q
+from django.middleware.csrf import get_token
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
+from django.utils import timezone
 from django.views.static import serve
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods, require_POST
 
-from .agents import TenderAnalysisAgent
+from .agents import AgnesTenderAnalysisAgent, RuleBasedTenderAnalysisAgent, TenderAnalysisAgent
 from .models import (
     AnalysisReport,
     CompanyProfile,
     Contract,
     ProjectExperience,
     ProjectNote,
+    ProjectTask,
     Qualification,
     TenderDocument,
     TenderProject,
     TenderReference,
+    UserSecurityProfile,
 )
-from .services.pdf_parser import extract_pdf_text
+from .services.pdf_parser import extract_pdf_content
+from .services.blob_storage import (
+    is_blob_path,
+    is_client_blob_path,
+    persist_pdf,
+    read_private_blob,
+)
 from .services.report_qa import answer_report_question
 from .services.report_exporter import build_report_docx, build_report_pdf
+from .services.project_tasks import sync_report_tasks
+
+
+_PROJECT_TASK_SCHEMA_READY = False
 
 
 JSON_UTF8_CONTENT_TYPE = 'application/json; charset=utf-8'
+_DEMO_DATA_ENSURED = False
+ANALYSIS_MODES = {'rule_based', 'openai', 'agnes'}
 
 
 def utf8_json(data, **kwargs):
     kwargs.setdefault('content_type', JSON_UTF8_CONTENT_TYPE)
+    kwargs.setdefault('json_dumps_params', {'ensure_ascii': False})
     return JsonResponse(data, **kwargs)
+
+
+@require_http_methods(['GET'])
+def api_root(request):
+    return HttpResponse(
+        '''<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>策标后端服务</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #172033; background: #f4f7fb; font-family: "Microsoft YaHei", "PingFang SC", sans-serif; }
+    main { width: min(720px, calc(100% - 32px)); margin: 10vh auto; padding: 42px; border: 1px solid #dce4ef; border-radius: 16px; background: #fff; box-shadow: 0 24px 70px rgba(25, 50, 84, .12); }
+    .status { display: inline-flex; align-items: center; min-height: 30px; padding: 0 12px; color: #087556; border: 1px solid #b9dfd2; border-radius: 999px; background: #eaf7f2; font-size: 13px; font-weight: 700; }
+    h1 { margin: 22px 0 10px; font-size: clamp(30px, 5vw, 44px); }
+    p { margin: 0; color: #657083; line-height: 1.8; }
+    nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 32px; }
+    a { min-height: 48px; display: inline-flex; align-items: center; justify-content: center; padding: 0 18px; color: #fff; border-radius: 7px; background: #0b57d0; font-weight: 700; text-decoration: none; }
+    a.secondary { color: #0b57d0; border: 1px solid #a9c5f0; background: #f5f9ff; }
+    small { display: block; margin-top: 30px; color: #929aaa; }
+    @media (max-width: 560px) { main { margin: 0; width: 100%; min-height: 100vh; padding: 40px 22px; border: 0; border-radius: 0; } nav { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <span class="status">服务运行正常</span>
+    <h1>策标后端服务</h1>
+    <p>后端接口与生产数据库连接正常。管理人员可以进入后台维护账号、企业档案、项目和分析报告。</p>
+    <nav>
+      <a href="/admin/">进入管理后台</a>
+      <a class="secondary" href="/api/system/status/">查看接口状态</a>
+    </nav>
+    <small>Production API · cebiao.space</small>
+  </main>
+</body>
+</html>''',
+        content_type='text/html; charset=utf-8',
+    )
+
+
+def _resolve_analysis_mode(value):
+    mode = str(value or 'rule_based').strip().lower()
+    return mode if mode in ANALYSIS_MODES else None
+
+
+def _analyze_tender(tender_text, company_profile, analysis_mode):
+    agents = {
+        'rule_based': RuleBasedTenderAnalysisAgent,
+        'openai': TenderAnalysisAgent,
+        'agnes': AgnesTenderAnalysisAgent,
+    }
+    agent = agents[analysis_mode]()
+    report = agent.analyze(tender_text=tender_text, company_profile=company_profile)
+    report.setdefault('analysis_engine', 'rule_based')
+    return report
+
+
+def _password_change_required(user):
+    if not user.is_authenticated:
+        return False
+    return UserSecurityProfile.objects.filter(user=user, must_change_password=True).exists()
+
+
+
+
+def auth_status(request):
+    user = request.user
+    return utf8_json({
+        'ok': True,
+        'authenticated': user.is_authenticated,
+        'username': user.get_username() if user.is_authenticated else '',
+        'is_staff': bool(user.is_staff) if user.is_authenticated else False,
+        'must_change_password': _password_change_required(user),
+        'csrf_token': get_token(request),
+    })
+
+
+@require_POST
+def auth_login_api(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except json.JSONDecodeError:
+        return utf8_json({'ok': False, 'error': '请求体必须是有效的 JSON。'}, status=400)
+
+    username = str(payload.get('username') or '').strip()
+    password = str(payload.get('password') or '')
+    forwarded_for = request.headers.get('X-Forwarded-For', '')
+    client_ip = forwarded_for.split(',')[0].strip() or request.META.get('REMOTE_ADDR', 'unknown')
+    login_identity = f'{username.casefold()}:{client_ip}'
+    rate_key = f'login-failures:{hashlib.sha256(login_identity.encode("utf-8")).hexdigest()}'
+    failure_count = int(cache.get(rate_key, 0) or 0)
+    if failure_count >= 5:
+        return utf8_json({'ok': False, 'error': '登录尝试过多，请 10 分钟后重试。'}, status=429)
+
+    user = authenticate(request, username=username, password=password)
+    if user is None or not user.is_active:
+        cache.set(rate_key, failure_count + 1, timeout=600)
+        return utf8_json({'ok': False, 'error': '账号或密码错误。'}, status=401)
+
+    cache.delete(rate_key)
+    auth_login(request, user)
+    return utf8_json({
+        'ok': True,
+        'authenticated': True,
+        'username': user.get_username(),
+        'is_staff': bool(user.is_staff),
+        'must_change_password': _password_change_required(user),
+        'csrf_token': get_token(request),
+    })
+
+
+@require_POST
+def auth_register_api(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except json.JSONDecodeError:
+        return utf8_json({'ok': False, 'error': '请求体必须是有效的 JSON。'}, status=400)
+
+    username = str(payload.get('username') or '').strip()
+    display_name = str(payload.get('display_name') or '').strip()
+    email = str(payload.get('email') or '').strip()
+    company_name = str(payload.get('company_name') or '').strip()
+    password = str(payload.get('password') or '')
+    confirm_password = str(payload.get('confirm_password') or '')
+    accepted_terms = payload.get('accepted_terms') is True
+
+    forwarded_for = request.headers.get('X-Forwarded-For', '')
+    client_ip = forwarded_for.split(',')[0].strip() or request.META.get('REMOTE_ADDR', 'unknown')
+    rate_key = f'registration-attempts:{hashlib.sha256(client_ip.encode("utf-8")).hexdigest()}'
+    attempt_count = int(cache.get(rate_key, 0) or 0)
+    if attempt_count >= 5:
+        return utf8_json({'ok': False, 'error': '注册操作过于频繁，请 1 小时后重试。'}, status=429)
+    cache.set(rate_key, attempt_count + 1, timeout=3600)
+
+    if not re.fullmatch(r'[\w.@+-]{3,30}', username, flags=re.UNICODE):
+        return utf8_json({'ok': False, 'error': '账号需为 3-30 位，可使用中文、字母、数字及 _ . @ + -。'}, status=400)
+    if not display_name or len(display_name) > 30:
+        return utf8_json({'ok': False, 'error': '请填写不超过 30 个字符的联系人姓名。'}, status=400)
+    if not email:
+        return utf8_json({'ok': False, 'error': '请填写工作邮箱。'}, status=400)
+    if not company_name or len(company_name) > 120:
+        return utf8_json({'ok': False, 'error': '请填写不超过 120 个字符的企业名称。'}, status=400)
+    if password != confirm_password:
+        return utf8_json({'ok': False, 'error': '两次输入的密码不一致。'}, status=400)
+    if not accepted_terms:
+        return utf8_json({'ok': False, 'error': '请阅读并同意服务协议和隐私政策。'}, status=400)
+
+    user_model = get_user_model()
+    if user_model.objects.filter(username__iexact=username).exists():
+        return utf8_json({'ok': False, 'error': '该账号已被注册。'}, status=409)
+    if user_model.objects.filter(email__iexact=email).exists():
+        return utf8_json({'ok': False, 'error': '该邮箱已被注册。'}, status=409)
+
+    candidate = user_model(username=username, email=email, first_name=display_name)
+    try:
+        candidate.full_clean(exclude=['password'])
+        validate_password(password, user=candidate)
+    except ValidationError as exc:
+        return utf8_json({'ok': False, 'error': '；'.join(exc.messages)}, status=400)
+
+    with transaction.atomic():
+        candidate.set_password(password)
+        candidate.save()
+        UserSecurityProfile.objects.create(
+            user=candidate,
+            must_change_password=False,
+            password_changed_at=timezone.now(),
+        )
+        CompanyProfile.objects.create(owner=candidate, name=company_name)
+
+    cache.delete(rate_key)
+    auth_login(request, candidate)
+    return utf8_json({
+        'ok': True,
+        'authenticated': True,
+        'username': candidate.get_username(),
+        'is_staff': False,
+        'must_change_password': False,
+        'csrf_token': get_token(request),
+    }, status=201)
+
+
+@require_POST
+def auth_logout_api(request):
+    auth_logout(request)
+    return utf8_json({'ok': True, 'authenticated': False, 'csrf_token': get_token(request)})
+
+
+@require_POST
+def auth_change_password_api(request):
+    if not request.user.is_authenticated:
+        return utf8_json({'ok': False, 'error': '请先登录。'}, status=401)
+
+    try:
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except json.JSONDecodeError:
+        return utf8_json({'ok': False, 'error': '请求体必须是有效的 JSON。'}, status=400)
+
+    current_password = str(payload.get('current_password') or '')
+    new_password = str(payload.get('new_password') or '')
+    confirm_password = str(payload.get('confirm_password') or '')
+    if not request.user.check_password(current_password):
+        return utf8_json({'ok': False, 'error': '当前密码不正确。'}, status=400)
+    if new_password != confirm_password:
+        return utf8_json({'ok': False, 'error': '两次输入的新密码不一致。'}, status=400)
+    if current_password == new_password:
+        return utf8_json({'ok': False, 'error': '新密码不能与当前密码相同。'}, status=400)
+
+    try:
+        validate_password(new_password, user=request.user)
+    except ValidationError as exc:
+        return utf8_json({'ok': False, 'error': '；'.join(exc.messages)}, status=400)
+
+    request.user.set_password(new_password)
+    request.user.save(update_fields=['password'])
+    update_session_auth_hash(request, request.user)
+    security_profile, _ = UserSecurityProfile.objects.get_or_create(user=request.user)
+    security_profile.must_change_password = False
+    security_profile.password_changed_at = timezone.now()
+    security_profile.save(update_fields=['must_change_password', 'password_changed_at', 'updated_at'])
+    return utf8_json({
+        'ok': True,
+        'authenticated': True,
+        'username': request.user.get_username(),
+        'is_staff': bool(request.user.is_staff),
+        'must_change_password': False,
+        'csrf_token': get_token(request),
+    })
+
+
+def authorize_blob_upload(request):
+    if not request.user.is_authenticated:
+        return utf8_json({'ok': False, 'error': '请先登录。'}, status=401)
+
+    company_id = request.GET.get('company_id')
+    if not company_id or not _companies_for_request(request).filter(id=company_id).exists():
+        return utf8_json({'ok': False, 'error': '企业档案不存在。'}, status=404)
+
+    cache_key = f'blob-upload-authorizations:{request.user.pk}'
+    if cache.add(cache_key, 1, timeout=600):
+        authorization_count = 1
+    else:
+        try:
+            authorization_count = cache.incr(cache_key)
+        except ValueError:
+            cache.set(cache_key, 1, timeout=600)
+            authorization_count = 1
+    if authorization_count > 10:
+        return utf8_json({'ok': False, 'error': '上传过于频繁，请 10 分钟后重试。'}, status=429)
+
+    return utf8_json({'ok': True, 'username': request.user.get_username()})
+
+
+@require_http_methods(['GET', 'POST'])
+def staff_account_management(request):
+    if not request.user.is_authenticated:
+        return utf8_json({'ok': False, 'error': '请先登录。'}, status=401)
+    if not request.user.is_staff:
+        return utf8_json({'ok': False, 'error': '仅管理员可以管理账号。'}, status=403)
+
+    if request.method == 'POST':
+        try:
+            payload = json.loads(request.body.decode('utf-8') or '{}')
+        except json.JSONDecodeError:
+            return utf8_json({'ok': False, 'error': '请求体必须是有效的 JSON。'}, status=400)
+
+        action = str(payload.get('action') or '').strip()
+        user_model = get_user_model()
+        if action == 'create_user':
+            username = str(payload.get('username') or '').strip()
+            password = str(payload.get('password') or '')
+            email = str(payload.get('email') or '').strip()
+            display_name = str(payload.get('display_name') or '').strip()
+            if not username:
+                return utf8_json({'ok': False, 'error': '账号不能为空。'}, status=400)
+            if user_model.objects.filter(username__iexact=username).exists():
+                return utf8_json({'ok': False, 'error': '该账号已存在。'}, status=409)
+
+            candidate = user_model(username=username, email=email, first_name=display_name)
+            try:
+                candidate.full_clean(exclude=['password'])
+                validate_password(password, user=candidate)
+            except ValidationError as exc:
+                return utf8_json({'ok': False, 'error': '；'.join(exc.messages)}, status=400)
+            candidate.set_password(password)
+            candidate.save()
+            UserSecurityProfile.objects.update_or_create(
+                user=candidate,
+                defaults={'must_change_password': True},
+            )
+        elif action == 'reset_password':
+            user = user_model.objects.filter(
+                id=payload.get('user_id'),
+                is_staff=False,
+                is_superuser=False,
+            ).first()
+            if user is None:
+                return utf8_json({'ok': False, 'error': '普通用户不存在。'}, status=404)
+            password = str(payload.get('password') or '')
+            try:
+                validate_password(password, user=user)
+            except ValidationError as exc:
+                return utf8_json({'ok': False, 'error': '；'.join(exc.messages)}, status=400)
+            user.set_password(password)
+            user.save(update_fields=['password'])
+            UserSecurityProfile.objects.update_or_create(
+                user=user,
+                defaults={'must_change_password': True, 'password_changed_at': None},
+            )
+        elif action == 'assign_company':
+            company = CompanyProfile.objects.filter(id=payload.get('company_id')).first()
+            if company is None:
+                return utf8_json({'ok': False, 'error': '企业档案不存在。'}, status=404)
+            user_id = payload.get('user_id')
+            owner = None
+            if user_id:
+                owner = user_model.objects.filter(id=user_id, is_active=True).first()
+                if owner is None:
+                    return utf8_json({'ok': False, 'error': '目标账号不存在或已停用。'}, status=404)
+            company.owner = owner
+            company.save(update_fields=['owner', 'updated_at'])
+        else:
+            return utf8_json({'ok': False, 'error': '不支持的管理操作。'}, status=400)
+
+    user_model = get_user_model()
+    users = [
+        {
+            'id': user.id,
+            'username': user.get_username(),
+            'display_name': user.first_name,
+            'email': user.email,
+            'is_staff': user.is_staff,
+            'is_superuser': user.is_superuser,
+            'is_active': user.is_active,
+            'must_change_password': _password_change_required(user),
+        }
+        for user in user_model.objects.order_by('username')
+    ]
+    companies = [
+        {
+            'id': company.id,
+            'name': company.name,
+            'owner_id': company.owner_id,
+            'owner_username': company.owner.get_username() if company.owner else '',
+        }
+        for company in CompanyProfile.objects.select_related('owner').order_by('name')
+    ]
+    return utf8_json({'ok': True, 'users': users, 'companies': companies})
+
+
+def _access_control_enabled():
+    return bool(getattr(settings, 'DATA_ACCESS_CONTROL_ENABLED', False))
+
+
+def _authentication_error(request):
+    if _access_control_enabled() and not request.user.is_authenticated:
+        return utf8_json({'ok': False, 'error': '请先登录。'}, status=401)
+    return None
+
+
+def _companies_for_request(request):
+    queryset = CompanyProfile.objects.all()
+    if not _access_control_enabled() or (request.user.is_authenticated and request.user.is_staff):
+        return queryset
+    if request.user.is_authenticated:
+        return queryset.filter(owner=request.user)
+    return queryset.none()
+
+
+def _projects_for_request(request):
+    queryset = TenderProject.objects.all()
+    if not _access_control_enabled() or (request.user.is_authenticated and request.user.is_staff):
+        return queryset
+    if request.user.is_authenticated:
+        return queryset.filter(company__owner=request.user)
+    return queryset.none()
+
+
+def _reports_for_request(request):
+    queryset = AnalysisReport.objects.all()
+    if not _access_control_enabled() or (request.user.is_authenticated and request.user.is_staff):
+        return queryset
+    if request.user.is_authenticated:
+        return queryset.filter(tender_project__company__owner=request.user)
+    return queryset.none()
+
+
+def _ensure_demo_data_available():
+    global _DEMO_DATA_ENSURED
+    if _DEMO_DATA_ENSURED or not getattr(settings, 'AUTO_SEED_DEMO_DATA', False):
+        return
+
+    has_enough_data = (
+        CompanyProfile.objects.count() >= 3
+        and TenderProject.objects.count() >= 10
+        and AnalysisReport.objects.count() >= 10
+        and Contract.objects.count() >= 15
+        and TenderReference.objects.count() >= 10
+    )
+    if not has_enough_data:
+        call_command('seed_workspace_demo', verbosity=0)
+    _DEMO_DATA_ENSURED = True
 
 
 def frontend_app(request, *args, **kwargs):
@@ -46,9 +479,99 @@ def frontend_static(request, path):
     return serve(request, path, document_root=Path(settings.BASE_DIR) / 'static' / 'frontend')
 
 
-@csrf_exempt
+def download_tender_document(request, document_id):
+    if not request.user.is_authenticated:
+        return utf8_json({'ok': False, 'error': '请先登录。'}, status=401)
+    try:
+        documents = TenderDocument.objects.select_related('tender_project__company')
+        if not request.user.is_staff:
+            documents = documents.filter(tender_project__company__owner=request.user)
+        document = documents.get(id=document_id)
+    except TenderDocument.DoesNotExist as exc:
+        raise Http404('招标文件不存在。') from exc
+
+    if is_blob_path(document.file.name):
+        try:
+            content = read_private_blob(document.file.name)
+        except FileNotFoundError as exc:
+            raise Http404(str(exc)) from exc
+        return FileResponse(
+            BytesIO(content),
+            as_attachment=True,
+            filename=document.original_name,
+            content_type='application/pdf',
+        )
+
+    try:
+        return FileResponse(
+            document.file.open('rb'),
+            as_attachment=True,
+            filename=document.original_name,
+            content_type='application/pdf',
+        )
+    except (FileNotFoundError, OSError) as exc:
+        raise Http404('原始文件已不在当前服务器中。') from exc
+
+
+def system_status(request):
+    openai_configured = bool(os.getenv('OPENAI_API_KEY', '').strip())
+    analysis_enabled = os.getenv('OPENAI_ANALYSIS_ENABLED', '1').strip().lower() not in {
+        '0',
+        'false',
+        'no',
+    }
+    openai_enabled = openai_configured and analysis_enabled
+    agnes_configured = bool(os.getenv('AGNES_API_KEY', '').strip())
+    agnes_analysis_enabled = os.getenv('AGNES_ANALYSIS_ENABLED', '1').strip().lower() not in {
+        '0',
+        'false',
+        'no',
+    }
+    agnes_enabled = agnes_configured and agnes_analysis_enabled
+    available_modes = ['rule_based']
+    if openai_enabled:
+        available_modes.append('openai')
+    if agnes_enabled:
+        available_modes.append('agnes')
+    assigned_company_count = CompanyProfile.objects.filter(owner__isnull=False).count()
+    total_company_count = CompanyProfile.objects.count()
+
+    return utf8_json(
+        {
+            'ok': True,
+            'analysis': {
+                'mode': 'user_selected',
+                'default_mode': 'rule_based',
+                'available_modes': available_modes,
+                'openai_configured': openai_configured,
+                'openai_enabled': openai_enabled,
+                'model': os.getenv('OPENAI_ANALYSIS_MODEL', 'gpt-5.6'),
+                'agnes_configured': agnes_configured,
+                'agnes_enabled': agnes_enabled,
+                'agnes_model': os.getenv('AGNES_ANALYSIS_MODEL', 'agnes-2.0-flash'),
+                'fallback_enabled': True,
+            },
+            'ownership': {
+                'assigned_companies': assigned_company_count,
+                'unassigned_companies': max(total_company_count - assigned_company_count, 0),
+            },
+            'data': {
+                'companies': CompanyProfile.objects.count(),
+                'projects': TenderProject.objects.count(),
+                'reports': AnalysisReport.objects.count(),
+                'contracts': Contract.objects.count(),
+                'reference_tenders': TenderReference.objects.count(),
+            },
+        },
+        json_dumps_params={'ensure_ascii': False},
+    )
+
+
 @require_POST
 def analyze_tender_agent(request):
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
     try:
         payload = json.loads(request.body.decode('utf-8') or '{}')
     except json.JSONDecodeError:
@@ -58,11 +581,15 @@ def analyze_tender_agent(request):
     if not tender_text:
         return utf8_json({'ok': False, 'error': 'tender_text 不能为空。'}, status=400)
 
+    analysis_mode = _resolve_analysis_mode(payload.get('analysis_mode'))
+    if analysis_mode is None:
+        return utf8_json({'ok': False, 'error': 'analysis_mode 仅支持 rule_based、openai 或 agnes。'}, status=400)
+
     company = None
     company_id = payload.get('company_id')
     if company_id:
         try:
-            company = CompanyProfile.objects.prefetch_related('qualifications', 'experiences').get(id=company_id)
+            company = _companies_for_request(request).prefetch_related('qualifications', 'experiences').get(id=company_id)
         except CompanyProfile.DoesNotExist:
             return utf8_json({'ok': False, 'error': '企业档案不存在。'}, status=404)
 
@@ -70,10 +597,7 @@ def analyze_tender_agent(request):
     if not isinstance(company_profile, dict):
         return utf8_json({'ok': False, 'error': 'company_profile 必须是对象。'}, status=400)
 
-    report = TenderAnalysisAgent().analyze(
-        tender_text=tender_text,
-        company_profile=company_profile,
-    )
+    report = _analyze_tender(tender_text, company_profile, analysis_mode)
 
     response_payload = {'ok': True, 'report': report}
     if payload.get('save'):
@@ -93,20 +617,30 @@ def analyze_tender_agent(request):
 
 
 def list_companies(request):
-    companies = CompanyProfile.objects.order_by('name').values('id', 'name', 'main_business', 'service_regions')
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
+    _ensure_demo_data_available()
+    companies = sorted(
+        _companies_for_request(request).values('id', 'name', 'main_business', 'service_regions'),
+        key=lambda item: (0 if '小苏' in item['name'] else 1, item['name']),
+    )
     return utf8_json(
         {
             'ok': True,
-            'companies': list(companies),
+            'companies': companies,
         },
         json_dumps_params={'ensure_ascii': False},
     )
 
 
-@csrf_exempt
 def company_profile_detail(request):
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
     if request.method == 'GET':
-        company = CompanyProfile.objects.prefetch_related('qualifications', 'experiences').order_by('name').first()
+        _ensure_demo_data_available()
+        company = _default_company_queryset(request).first()
         return utf8_json(
             {
                 'ok': True,
@@ -129,14 +663,14 @@ def company_profile_detail(request):
 
     company_id = payload.get('id')
     if company_id:
-        company = CompanyProfile.objects.filter(id=company_id).first()
+        company = _companies_for_request(request).filter(id=company_id).first()
         if company is None:
             return utf8_json({'ok': False, 'error': '企业档案不存在。'}, status=404)
     else:
-        company = CompanyProfile.objects.order_by('name').first()
+        company = _default_company_queryset(request).first()
 
     if company is None:
-        company = CompanyProfile()
+        company = CompanyProfile(owner=request.user if request.user.is_authenticated else None)
 
     company.name = name
     company.main_business = str(payload.get('main_business') or '').strip()
@@ -148,7 +682,7 @@ def company_profile_detail(request):
     _replace_company_qualifications(company, payload.get('qualifications') or [])
     _replace_company_experiences(company, payload.get('experiences') or [])
 
-    company = CompanyProfile.objects.prefetch_related('qualifications', 'experiences').get(id=company.id)
+    company = _companies_for_request(request).prefetch_related('qualifications', 'experiences').get(id=company.id)
     return utf8_json(
         {
             'ok': True,
@@ -158,14 +692,27 @@ def company_profile_detail(request):
     )
 
 
+def _default_company_queryset(request):
+    queryset = _companies_for_request(request).prefetch_related('qualifications', 'experiences')
+    preferred = queryset.filter(name__contains='小苏')
+    if preferred.exists():
+        return preferred.order_by('name')
+    return queryset.order_by('name')
+
+
 def project_dashboard(request):
-    projects = TenderProject.objects.select_related('company').prefetch_related('analysis_report').order_by('-created_at')
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
+    _ensure_project_task_schema()
+    _ensure_demo_data_available()
+    projects = _projects_for_request(request).select_related('company').prefetch_related('analysis_report', 'tasks').order_by('-created_at')
     decision = request.GET.get('decision')
     if decision:
         projects = projects.filter(analysis_report__decision=decision)
 
     rows = [_serialize_project_row(project) for project in projects]
-    summary_source = TenderProject.objects.select_related('analysis_report').all()
+    summary_source = _projects_for_request(request).select_related('analysis_report')
     summary = {
         'total': summary_source.count(),
         'recommended': summary_source.filter(analysis_report__decision=AnalysisReport.Decision.RECOMMENDED).count(),
@@ -185,8 +732,13 @@ def project_dashboard(request):
 
 
 def recent_projects(request):
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
+    _ensure_project_task_schema()
+    _ensure_demo_data_available()
     projects = (
-        TenderProject.objects.select_related('company', 'analysis_report')
+        _projects_for_request(request).select_related('company', 'analysis_report')
         .filter(analysis_report__isnull=False)
         .order_by('-created_at')[:5]
     )
@@ -205,6 +757,7 @@ def recent_projects(request):
 
 
 def list_reference_tenders(request):
+    _ensure_demo_data_available()
     references = TenderReference.objects.all()
     project_type = str(request.GET.get('project_type') or '').strip()
     industry = str(request.GET.get('industry') or '').strip()
@@ -232,14 +785,15 @@ def list_reference_tenders(request):
 
 
 def contracts_page(request):
+    _ensure_demo_data_available()
     contracts = [_serialize_contract(item) for item in Contract.objects.all()]
     return HttpResponse(_contracts_page_html(contracts), content_type='text/html; charset=utf-8')
 
 
-@csrf_exempt
 @require_http_methods(['GET', 'POST'])
 def contracts_collection(request):
     if request.method == 'GET':
+        _ensure_demo_data_available()
         contracts = [_serialize_contract(item) for item in Contract.objects.all()]
         if _prefers_html(request):
             return HttpResponse(_contracts_page_html(contracts), content_type='text/html; charset=utf-8')
@@ -250,6 +804,11 @@ def contracts_collection(request):
             },
             json_dumps_params={'ensure_ascii': False},
         )
+
+    if not request.user.is_authenticated:
+        return utf8_json({'ok': False, 'error': '请先登录。'}, status=401)
+    if not request.user.is_staff:
+        return utf8_json({'ok': False, 'error': '仅管理员可以新增合同模板。'}, status=403)
 
     payload = _load_json_payload(request)
     if isinstance(payload, JsonResponse):
@@ -271,7 +830,6 @@ def contracts_collection(request):
     )
 
 
-@csrf_exempt
 @require_http_methods(['GET', 'PUT', 'DELETE'])
 def contract_detail_api(request, contract_id):
     try:
@@ -287,6 +845,11 @@ def contract_detail_api(request, contract_id):
             },
             json_dumps_params={'ensure_ascii': False},
         )
+
+    if not request.user.is_authenticated:
+        return utf8_json({'ok': False, 'error': '请先登录。'}, status=401)
+    if not request.user.is_staff:
+        return utf8_json({'ok': False, 'error': '仅管理员可以修改合同模板。'}, status=403)
 
     if request.method == 'DELETE':
         contract.delete()
@@ -313,18 +876,141 @@ def contract_detail_api(request, contract_id):
     )
 
 
+def _safe_score(value, fallback=0):
+    try:
+        return max(0, min(100, round(float(value))))
+    except (TypeError, ValueError):
+        return max(0, min(100, round(float(fallback or 0))))
+
+
+def _risk_level_key(level):
+    value = str(level or '').strip()
+    if '高' in value:
+        return 'high'
+    if '中' in value:
+        return 'medium'
+    return 'low'
+
+
+def _build_report_sections(report):
+    """Fill presentation-only sections for reports created before richer analysis fields existed."""
+    raw_report = report.raw_report or {}
+    risks = report.risks or []
+    missing_materials = report.missing_materials or []
+    material_checklist = raw_report.get('material_checklist') or []
+    qualification_match = raw_report.get('qualification_match') or {}
+    experience_match = raw_report.get('experience_match') or {}
+
+    risk_counts = {'high': 0, 'medium': 0, 'low': 0}
+    for risk in risks:
+        risk_counts[_risk_level_key(risk.get('level'))] += 1
+
+    review_summary = dict(raw_report.get('review_summary') or {})
+    review_levels = {
+        AnalysisReport.Decision.RECOMMENDED: '可推进',
+        AnalysisReport.Decision.CAUTIOUS: '需复核',
+        AnalysisReport.Decision.NOT_RECOMMENDED: '建议暂停',
+        AnalysisReport.Decision.NEEDS_REVIEW: '人工复核',
+    }
+    missing_count = len(missing_materials)
+    material_status = '材料齐备'
+    if missing_count > 2:
+        material_status = '多项材料待补'
+    elif missing_count:
+        material_status = '少量材料待补'
+
+    scoring_breakdown = raw_report.get('scoring_breakdown') or []
+    if not scoring_breakdown:
+        qualification_score = _safe_score(qualification_match.get('score'), report.match_score)
+        experience_score = _safe_score(experience_match.get('score'), report.match_score)
+        risk_score = max(
+            0,
+            100 - (risk_counts['high'] * 20) - (risk_counts['medium'] * 8) - (risk_counts['low'] * 2),
+        )
+        scoring_breakdown = [
+            {
+                'dimension': '资质匹配',
+                'score': qualification_score,
+                'weight': '35%',
+                'comment': '根据历史报告中保存的资质匹配结果补全。',
+            },
+            {
+                'dimension': '业绩支撑',
+                'score': experience_score,
+                'weight': '25%',
+                'comment': '根据历史报告中保存的类似业绩结果补全。',
+            },
+            {
+                'dimension': '风险可控',
+                'score': risk_score,
+                'weight': '25%',
+                'comment': '根据当前风险等级与数量估算，用于历史报告展示。',
+            },
+            {
+                'dimension': '综合决策',
+                'score': _safe_score(report.match_score),
+                'weight': '15%',
+                'comment': '沿用历史报告的综合匹配评分。',
+            },
+        ]
+
+    valid_scores = [
+        _safe_score(item.get('score'))
+        for item in scoring_breakdown
+        if item.get('score') is not None
+    ]
+    review_summary.setdefault('review_level', review_levels.get(report.decision, '待复核'))
+    review_summary.setdefault('material_status', material_status)
+    review_summary.setdefault(
+        'average_dimension_score',
+        round(sum(valid_scores) / len(valid_scores)) if valid_scores else _safe_score(report.match_score),
+    )
+    review_summary['high_risk_count'] = risk_counts['high']
+    review_summary.setdefault('material_required_count', len(material_checklist))
+    review_summary['material_missing_count'] = missing_count
+
+    key_findings = raw_report.get('key_findings') or []
+    if not key_findings:
+        key_findings = [f'系统建议：{report.get_decision_display()}（综合匹配度 {report.match_score}）']
+        if missing_materials:
+            key_findings.append(f"待补材料：{'、'.join(str(item) for item in missing_materials[:3])}")
+        if risk_counts['high']:
+            key_findings.append(f"优先处理 {risk_counts['high']} 项高风险事项")
+        elif risks:
+            key_findings.append(f"持续跟踪 {len(risks)} 项风险事项")
+
+    return {
+        'review_summary': review_summary,
+        'scoring_breakdown': scoring_breakdown,
+        'key_findings': key_findings,
+    }
+
+
 def project_detail(request, project_id):
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
+    _ensure_project_task_schema()
     try:
         project = (
-            TenderProject.objects.select_related('company')
-            .prefetch_related('analysis_report', 'notes')
+            _projects_for_request(request).select_related('company')
+            .prefetch_related('analysis_report', 'notes', 'tasks')
             .get(id=project_id)
         )
     except TenderProject.DoesNotExist:
         return utf8_json({'ok': False, 'error': '项目不存在。'}, status=404)
 
     report = getattr(project, 'analysis_report', None)
+    project_tasks = list(project.tasks.all())
+    if report:
+        project_tasks = sync_report_tasks(report)
     raw_report = report.raw_report if report else {}
+    report_sections = _build_report_sections(report) if report else {}
+    assignees = {'投标经理'}
+    if request.user.is_authenticated:
+        assignees.add(request.user.username)
+    if project.company and project.company.owner:
+        assignees.add(project.company.owner.username)
 
     return utf8_json(
         {
@@ -332,6 +1018,8 @@ def project_detail(request, project_id):
             'project': _serialize_project_row(project),
             'report': _serialize_project_report(report),
             'notes': [_serialize_project_note(note) for note in project.notes.all()],
+            'tasks': [_serialize_project_task(task) for task in project_tasks],
+            'available_assignees': sorted(assignees),
             'workspace': {
                 'risk_count': len(report.risks or []) if report else 0,
                 'material_count': len(raw_report.get('material_checklist', [])),
@@ -342,15 +1030,20 @@ def project_detail(request, project_id):
                 'agent_trace': raw_report.get('agent_trace', []),
                 'qualification_match': raw_report.get('qualification_match', {}),
                 'experience_match': raw_report.get('experience_match', {}),
+                'scoring_breakdown': report_sections.get('scoring_breakdown', []),
+                'review_summary': report_sections.get('review_summary', {}),
+                'key_findings': report_sections.get('key_findings', []),
             },
         },
         json_dumps_params={'ensure_ascii': False},
     )
 
 
-@csrf_exempt
 @require_POST
 def update_project_status(request, project_id):
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
     try:
         payload = json.loads(request.body.decode('utf-8') or '{}')
     except json.JSONDecodeError:
@@ -362,7 +1055,7 @@ def update_project_status(request, project_id):
         return utf8_json({'ok': False, 'error': '项目状态不合法。'}, status=400)
 
     try:
-        project = TenderProject.objects.select_related('company').prefetch_related('analysis_report').get(id=project_id)
+        project = _projects_for_request(request).select_related('company').prefetch_related('analysis_report').get(id=project_id)
     except TenderProject.DoesNotExist:
         return utf8_json({'ok': False, 'error': '项目不存在。'}, status=404)
 
@@ -377,7 +1070,7 @@ def update_project_status(request, project_id):
             content=f'项目状态从「{old_status_label}」变更为「{new_status_label}」。',
             operator_name=str(payload.get('operator_name') or '系统').strip() or '系统',
         )
-    project = TenderProject.objects.select_related('company').prefetch_related('analysis_report').get(id=project.id)
+    project = _projects_for_request(request).select_related('company').prefetch_related('analysis_report').get(id=project.id)
 
     return utf8_json(
         {
@@ -388,16 +1081,18 @@ def update_project_status(request, project_id):
     )
 
 
-@csrf_exempt
 @require_POST
 def create_project_note(request, project_id):
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
     try:
         payload = json.loads(request.body.decode('utf-8') or '{}')
     except json.JSONDecodeError:
         return utf8_json({'ok': False, 'error': '请求体必须是有效的 JSON。'}, status=400)
 
     try:
-        project = TenderProject.objects.get(id=project_id)
+        project = _projects_for_request(request).get(id=project_id)
     except TenderProject.DoesNotExist:
         return utf8_json({'ok': False, 'error': '项目不存在。'}, status=404)
 
@@ -426,15 +1121,106 @@ def create_project_note(request, project_id):
     )
 
 
-def report_detail(request, report_id):
+@require_POST
+def update_project_task_status(request, task_id):
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
+    _ensure_project_task_schema()
     try:
-        report = AnalysisReport.objects.select_related('tender_project', 'tender_project__company').get(id=report_id)
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except json.JSONDecodeError:
+        return utf8_json({'ok': False, 'error': '请求体必须是有效的 JSON。'}, status=400)
+
+    task = ProjectTask.objects.select_related('tender_project').filter(
+        id=task_id,
+        tender_project__in=_projects_for_request(request),
+    ).first()
+    if task is None:
+        return utf8_json({'ok': False, 'error': '任务不存在。'}, status=404)
+
+    update_fields = []
+    if 'status' in payload:
+        status = str(payload.get('status') or '').strip()
+        valid_statuses = {value for value, _ in ProjectTask.Status.choices}
+        if status not in valid_statuses:
+            return utf8_json({'ok': False, 'error': '任务状态不合法。'}, status=400)
+        task.status = status
+        task.completed_at = timezone.now() if status == ProjectTask.Status.COMPLETED else None
+        update_fields.extend(['status', 'completed_at'])
+
+    if 'assignee_name' in payload:
+        task.assignee_name = str(payload.get('assignee_name') or '').strip()[:80]
+        update_fields.append('assignee_name')
+
+    if 'remind_at' in payload:
+        reminder_value = payload.get('remind_at')
+        remind_at = _parse_report_deadline(reminder_value) if reminder_value else None
+        if reminder_value and remind_at is None:
+            return utf8_json({'ok': False, 'error': '提醒时间格式不合法。'}, status=400)
+        task.remind_at = remind_at
+        task.reminder_read_at = None
+        update_fields.extend(['remind_at', 'reminder_read_at'])
+
+    if not update_fields:
+        return utf8_json({'ok': False, 'error': '没有需要更新的任务字段。'}, status=400)
+    task.save(update_fields=[*dict.fromkeys(update_fields), 'updated_at'])
+    return utf8_json({'ok': True, 'task': _serialize_project_task(task)}, json_dumps_params={'ensure_ascii': False})
+
+
+def list_task_notifications(request):
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
+    _ensure_project_task_schema()
+    tasks = ProjectTask.objects.select_related('tender_project').filter(
+        tender_project__in=_projects_for_request(request),
+        status=ProjectTask.Status.PENDING,
+        remind_at__isnull=False,
+        remind_at__lte=timezone.now(),
+    )
+    if not request.user.is_staff:
+        tasks = tasks.filter(Q(assignee_name='') | Q(assignee_name=request.user.username))
+    tasks = tasks.order_by('remind_at', 'due_at')[:30]
+    rows = [_serialize_project_task(task) for task in tasks]
+    return utf8_json(
+        {
+            'ok': True,
+            'unread_count': sum(1 for task in tasks if task.reminder_read_at is None),
+            'notifications': rows,
+            'channels': {'in_app': True, 'email': False, 'wecom': False},
+        },
+        json_dumps_params={'ensure_ascii': False},
+    )
+
+
+@require_POST
+def mark_task_notification_read(request, task_id):
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
+    _ensure_project_task_schema()
+    task = ProjectTask.objects.filter(id=task_id, tender_project__in=_projects_for_request(request)).first()
+    if task is None:
+        return utf8_json({'ok': False, 'error': '提醒不存在。'}, status=404)
+    task.reminder_read_at = timezone.now()
+    task.save(update_fields=['reminder_read_at', 'updated_at'])
+    return utf8_json({'ok': True, 'task': _serialize_project_task(task)}, json_dumps_params={'ensure_ascii': False})
+
+
+def report_detail(request, report_id):
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
+    try:
+        report = _reports_for_request(request).select_related('tender_project', 'tender_project__company').get(id=report_id)
     except AnalysisReport.DoesNotExist:
         return utf8_json({'ok': False, 'error': '分析报告不存在。'}, status=404)
 
     project = report.tender_project
     company = project.company
     raw_report = report.raw_report or {}
+    report_sections = _build_report_sections(report)
 
     return utf8_json(
         {
@@ -457,6 +1243,7 @@ def report_detail(request, report_id):
                     'project_type': project.project_type,
                     'region': project.region,
                     'budget_amount': float(project.budget_amount) if project.budget_amount is not None else None,
+                    'deadline': project.deadline.isoformat() if project.deadline else None,
                     'status': project.status,
                     'source_text': project.source_text,
                     'company': {
@@ -468,15 +1255,20 @@ def report_detail(request, report_id):
                 'qualification_match': raw_report.get('qualification_match', {}),
                 'experience_match': raw_report.get('experience_match', {}),
                 'material_checklist': raw_report.get('material_checklist', []),
+                'scoring_breakdown': report_sections['scoring_breakdown'],
+                'review_summary': report_sections['review_summary'],
+                'key_findings': report_sections['key_findings'],
             },
         },
         json_dumps_params={'ensure_ascii': False},
     )
 
 
-@csrf_exempt
 @require_POST
 def ask_report_question(request, report_id):
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
     try:
         payload = json.loads(request.body.decode('utf-8') or '{}')
     except json.JSONDecodeError:
@@ -486,7 +1278,7 @@ def ask_report_question(request, report_id):
     if not question:
         return utf8_json({'ok': False, 'error': '问题不能为空。'}, status=400)
 
-    report = _get_report_or_none(report_id)
+    report = _get_report_or_none(request, report_id)
     if report is None:
         return utf8_json({'ok': False, 'error': '分析报告不存在。'}, status=404)
 
@@ -503,7 +1295,10 @@ def ask_report_question(request, report_id):
 
 
 def export_report_pdf(request, report_id):
-    report = _get_report_or_none(report_id)
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
+    report = _get_report_or_none(request, report_id)
     if report is None:
         return utf8_json({'ok': False, 'error': '分析报告不存在。'}, status=404)
 
@@ -514,7 +1309,10 @@ def export_report_pdf(request, report_id):
 
 
 def export_report_word(request, report_id):
-    report = _get_report_or_none(report_id)
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
+    report = _get_report_or_none(request, report_id)
     if report is None:
         return utf8_json({'ok': False, 'error': '分析报告不存在。'}, status=404)
 
@@ -527,22 +1325,27 @@ def export_report_word(request, report_id):
     return response
 
 
-def _get_report_or_none(report_id):
+def _get_report_or_none(request, report_id):
     try:
-        return AnalysisReport.objects.select_related('tender_project', 'tender_project__company').get(id=report_id)
+        return _reports_for_request(request).select_related('tender_project', 'tender_project__company').get(id=report_id)
     except AnalysisReport.DoesNotExist:
         return None
 
 
-@csrf_exempt
 @require_POST
 def analyze_tender_pdf_agent(request):
+    if not request.user.is_authenticated:
+        return utf8_json({'ok': False, 'error': '请先登录后再上传 PDF。'}, status=401)
+
     company_id = request.POST.get('company_id')
     if not company_id:
         return utf8_json({'ok': False, 'error': 'company_id 不能为空。'}, status=400)
+    analysis_mode = _resolve_analysis_mode(request.POST.get('analysis_mode'))
+    if analysis_mode is None:
+        return utf8_json({'ok': False, 'error': 'analysis_mode 仅支持 rule_based、openai 或 agnes。'}, status=400)
 
     try:
-        company = CompanyProfile.objects.prefetch_related('qualifications', 'experiences').get(id=company_id)
+        company = _companies_for_request(request).prefetch_related('qualifications', 'experiences').get(id=company_id)
     except CompanyProfile.DoesNotExist:
         return utf8_json({'ok': False, 'error': '企业档案不存在。'}, status=404)
 
@@ -557,31 +1360,65 @@ def analyze_tender_pdf_agent(request):
         name=pdf_file.name.rsplit('.', 1)[0],
         status=TenderProject.Status.ANALYZING,
     )
-    document = TenderDocument.objects.create(
-        tender_project=project,
-        file=pdf_file,
-        original_name=pdf_file.name,
-        file_size=pdf_file.size,
-    )
+    try:
+        document = TenderDocument.objects.create(
+            tender_project=project,
+            file=pdf_file,
+            original_name=pdf_file.name,
+            file_size=pdf_file.size,
+        )
+    except Exception:
+        project.delete()
+        return utf8_json(
+            {'ok': False, 'error': 'PDF 临时文件保存失败，请稍后重试。'},
+            status=500,
+        )
 
     try:
-        extracted_text = extract_pdf_text(document.file.path)
+        local_file_path = document.file.path
+        extraction = extract_pdf_content(local_file_path, document.original_name)
+        extracted_text = extraction['text']
         if not extracted_text:
             raise ValueError('未能从 PDF 中提取到文本。')
 
+        try:
+            storage_info = persist_pdf(local_file_path, document.original_name, project.id)
+        except Exception as storage_error:
+            storage_info = {
+                'backend': 'temporary',
+                'persistent': False,
+                'pathname': document.file.name,
+                'warning': f'原始 PDF 永久保存失败：{storage_error}',
+            }
+
+        if storage_info['backend'] == 'vercel_blob':
+            document.file.name = storage_info['pathname']
+
         document.extracted_text = extracted_text
         document.parse_status = TenderDocument.ParseStatus.PARSED
-        document.save(update_fields=['extracted_text', 'parse_status', 'updated_at'])
+        document.error_message = '；'.join(
+            item
+            for item in [extraction.get('warning', ''), storage_info.get('warning', '')]
+            if item
+        )
+        update_fields = ['extracted_text', 'parse_status', 'error_message', 'updated_at']
+        if storage_info['backend'] == 'vercel_blob':
+            update_fields.append('file')
+        document.save(update_fields=update_fields)
+        if storage_info['backend'] == 'vercel_blob':
+            try:
+                os.remove(local_file_path)
+            except OSError:
+                pass
 
         company_profile = _company_profile_for_agent(company)
-        report = TenderAnalysisAgent().analyze(
-            tender_text=extracted_text,
-            company_profile=company_profile,
-        )
+        report = _analyze_tender(extracted_text, company_profile, analysis_mode)
         project.name = report.get('project_name') or project.name
         project.procurement_method = report.get('procurement_method') or ''
         project.project_type = report.get('project_type') or ''
+        project.region = report.get('region') or ''
         project.budget_amount = report.get('budget_amount')
+        project.deadline = _parse_report_deadline(report.get('deadline'))
         project.source_text = extracted_text
         project.status = TenderProject.Status.ANALYZED
         project.save(
@@ -589,7 +1426,9 @@ def analyze_tender_pdf_agent(request):
                 'name',
                 'procurement_method',
                 'project_type',
+                'region',
                 'budget_amount',
+                'deadline',
                 'source_text',
                 'status',
                 'updated_at',
@@ -612,9 +1451,139 @@ def analyze_tender_pdf_agent(request):
             'document_id': document.id,
             'report_id': analysis_report.id,
             'report': report,
+            'extraction': {
+                'method': extraction['method'],
+                'character_count': extraction['character_count'],
+                'used_vision': extraction['used_vision'],
+                'warning': extraction.get('warning', ''),
+            },
+            'storage': {
+                'backend': storage_info['backend'],
+                'persistent': storage_info['persistent'],
+                'warning': storage_info.get('warning', ''),
+            },
         },
         json_dumps_params={'ensure_ascii': False},
     )
+
+
+@require_POST
+def analyze_tender_blob_agent(request):
+    if not request.user.is_authenticated:
+        return utf8_json({'ok': False, 'error': '请先登录后再分析云端 PDF。'}, status=401)
+
+    try:
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except json.JSONDecodeError:
+        return utf8_json({'ok': False, 'error': '请求体必须是有效的 JSON。'}, status=400)
+
+    company_id = payload.get('company_id')
+    pathname = str(payload.get('pathname') or '').strip()
+    original_name = Path(str(payload.get('original_name') or 'document.pdf')).name
+    analysis_mode = _resolve_analysis_mode(payload.get('analysis_mode'))
+    if not company_id:
+        return utf8_json({'ok': False, 'error': 'company_id 不能为空。'}, status=400)
+    if analysis_mode is None:
+        return utf8_json({'ok': False, 'error': 'analysis_mode 仅支持 rule_based、openai 或 agnes。'}, status=400)
+    if not is_client_blob_path(pathname) or not pathname.lower().endswith('.pdf'):
+        return utf8_json({'ok': False, 'error': '云端 PDF 路径无效。'}, status=400)
+    if not original_name.lower().endswith('.pdf'):
+        return utf8_json({'ok': False, 'error': '请上传 PDF 文件。'}, status=400)
+
+    try:
+        company = _companies_for_request(request).prefetch_related('qualifications', 'experiences').get(id=company_id)
+    except CompanyProfile.DoesNotExist:
+        return utf8_json({'ok': False, 'error': '企业档案不存在。'}, status=404)
+
+    try:
+        pdf_content = read_private_blob(pathname)
+    except (FileNotFoundError, RuntimeError) as exc:
+        return utf8_json({'ok': False, 'error': str(exc)}, status=400)
+
+    if len(pdf_content) > 50 * 1024 * 1024:
+        return utf8_json({'ok': False, 'error': 'PDF 文件不能超过 50 MB。'}, status=400)
+    if not pdf_content.lstrip().startswith(b'%PDF'):
+        return utf8_json({'ok': False, 'error': '云端文件不是有效的 PDF。'}, status=400)
+
+    project = TenderProject.objects.create(
+        company=company,
+        name=original_name.rsplit('.', 1)[0],
+        status=TenderProject.Status.ANALYZING,
+    )
+    document = TenderDocument.objects.create(
+        tender_project=project,
+        file=pathname,
+        original_name=original_name,
+        file_size=len(pdf_content),
+    )
+
+    temporary_path = ''
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temporary_file:
+            temporary_file.write(pdf_content)
+            temporary_path = temporary_file.name
+
+        extraction = extract_pdf_content(temporary_path, original_name)
+        extracted_text = extraction['text']
+        if not extracted_text:
+            raise ValueError('未能从 PDF 中提取到文本。')
+
+        document.extracted_text = extracted_text
+        document.parse_status = TenderDocument.ParseStatus.PARSED
+        document.error_message = extraction.get('warning', '')
+        document.save(update_fields=['extracted_text', 'parse_status', 'error_message', 'updated_at'])
+
+        report = _analyze_tender(
+            extracted_text,
+            _company_profile_for_agent(company),
+            analysis_mode,
+        )
+        project.name = report.get('project_name') or project.name
+        project.procurement_method = report.get('procurement_method') or ''
+        project.project_type = report.get('project_type') or ''
+        project.region = report.get('region') or ''
+        project.budget_amount = report.get('budget_amount')
+        project.deadline = _parse_report_deadline(report.get('deadline'))
+        project.source_text = extracted_text
+        project.status = TenderProject.Status.ANALYZED
+        project.save(
+            update_fields=[
+                'name', 'procurement_method', 'project_type', 'region', 'budget_amount', 'deadline',
+                'source_text', 'status', 'updated_at',
+            ]
+        )
+        analysis_report = _create_analysis_report(project=project, report=report)
+    except Exception as exc:
+        document.parse_status = TenderDocument.ParseStatus.FAILED
+        document.error_message = str(exc)
+        document.save(update_fields=['parse_status', 'error_message', 'updated_at'])
+        project.status = TenderProject.Status.PENDING
+        project.save(update_fields=['status', 'updated_at'])
+        return utf8_json(
+            {'ok': False, 'error': str(exc), 'project_id': project.id, 'document_id': document.id},
+            status=400,
+        )
+    finally:
+        if temporary_path:
+            try:
+                os.remove(temporary_path)
+            except OSError:
+                pass
+
+    return utf8_json({
+        'ok': True,
+        'project_id': project.id,
+        'document_id': document.id,
+        'report_id': analysis_report.id,
+        'report': report,
+        'extraction': {
+            'method': extraction['method'],
+            'character_count': extraction['character_count'],
+            'used_vision': extraction['used_vision'],
+            'warning': extraction.get('warning', ''),
+        },
+        'storage': {'backend': 'vercel_blob', 'persistent': True, 'warning': ''},
+    })
 
 
 def _company_profile_for_agent(company):
@@ -666,7 +1635,11 @@ def _serialize_company_profile(company):
 
 
 def _serialize_project_row(project):
+    _ensure_project_task_schema()
     report = getattr(project, 'analysis_report', None)
+    tasks = list(project.tasks.all()) if hasattr(project, 'tasks') else []
+    pending_tasks = [task for task in tasks if task.status == ProjectTask.Status.PENDING]
+    overdue_tasks = [task for task in pending_tasks if task.due_at and task.due_at < timezone.now()]
     return {
         'id': project.id,
         'name': project.name,
@@ -675,6 +1648,7 @@ def _serialize_project_row(project):
         'project_type': project.project_type,
         'region': project.region,
         'budget_amount': float(project.budget_amount) if project.budget_amount is not None else None,
+        'deadline': project.deadline.isoformat() if project.deadline else None,
         'status': project.status,
         'status_label': project.get_status_display(),
         'created_at': project.created_at.isoformat(),
@@ -684,7 +1658,53 @@ def _serialize_project_row(project):
         'match_score': report.match_score if report else None,
         'risk_level': _project_risk_level(project),
         'summary': report.summary if report else '',
+        'pending_task_count': len(pending_tasks),
+        'overdue_task_count': len(overdue_tasks),
     }
+
+
+def _serialize_project_task(task):
+    now = timezone.now()
+    reminder_state = 'completed'
+    if task.status == ProjectTask.Status.PENDING:
+        if task.due_at and task.due_at < now:
+            reminder_state = 'overdue'
+        elif task.due_at and task.due_at <= now + timedelta(days=1):
+            reminder_state = 'due_soon'
+        else:
+            reminder_state = 'pending'
+    return {
+        'id': task.id,
+        'title': task.title,
+        'category': task.category,
+        'category_label': task.get_category_display(),
+        'status': task.status,
+        'status_label': task.get_status_display(),
+        'due_at': task.due_at.isoformat() if task.due_at else None,
+        'assignee_name': task.assignee_name,
+        'remind_at': task.remind_at.isoformat() if task.remind_at else None,
+        'reminder_unread': bool(task.remind_at and task.remind_at <= now and task.reminder_read_at is None and task.status == ProjectTask.Status.PENDING),
+        'project_id': task.tender_project_id,
+        'project_name': task.tender_project.name if hasattr(task, 'tender_project') else '',
+        'reminder_state': reminder_state,
+        'is_auto_generated': task.is_auto_generated,
+    }
+
+
+def _ensure_project_task_schema():
+    global _PROJECT_TASK_SCHEMA_READY
+    if _PROJECT_TASK_SCHEMA_READY:
+        return
+    table_name = ProjectTask._meta.db_table
+    tables = connection.introspection.table_names()
+    columns = set()
+    if table_name in tables:
+        with connection.cursor() as cursor:
+            columns = {column.name for column in connection.introspection.get_table_description(cursor, table_name)}
+    required_columns = {'assignee_name', 'remind_at', 'reminder_read_at'}
+    if table_name not in tables or not required_columns.issubset(columns):
+        call_command('migrate', 'tenders', interactive=False, verbosity=0)
+    _PROJECT_TASK_SCHEMA_READY = True
 
 
 def _prefers_html(request):
@@ -809,56 +1829,128 @@ def _contracts_page_html(contracts):
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>合同库</title>
   <style>
-    :root {{ color-scheme: light; }}
+    :root {{
+      color-scheme: light;
+      --canvas: #f6f4ef;
+      --surface: rgba(255, 255, 255, 0.78);
+      --ink: #111722;
+      --muted: #697385;
+      --line: #d9dee6;
+      --blue: #0b5fe7;
+      --blue-soft: #edf4ff;
+      --gold: #b48b34;
+      --danger: #d9404a;
+    }}
     * {{ box-sizing: border-box; }}
-    body {{ margin: 0; background: #eef1f6; color: #16202f; font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif; }}
-    .shell {{ width: min(1320px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 42px; }}
-    .topbar {{ display: flex; justify-content: space-between; gap: 16px; align-items: end; margin-bottom: 20px; }}
-    h1 {{ margin: 0; font-size: 30px; }}
-    .lead {{ margin: 8px 0 0; color: #5a6678; line-height: 1.7; }}
-    .back-link {{ color: #9a7335; font-weight: 700; }}
-    .layout {{ display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 18px; align-items: start; }}
-    .panel {{ background: rgba(255,255,255,0.92); border: 1px solid #d9e0ea; border-radius: 12px; box-shadow: 0 14px 30px rgba(18,23,34,0.06); }}
-    .list-panel {{ padding: 14px; position: sticky; top: 18px; }}
-    .form-panel {{ padding: 20px; }}
-    .list-head {{ display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 12px; }}
-    .list-head strong {{ font-size: 16px; }}
-    .list {{ display: grid; gap: 10px; max-height: calc(100vh - 180px); overflow: auto; }}
-    .contract-item {{ width: 100%; text-align: left; padding: 14px; border: 1px solid #d8dee8; border-radius: 10px; background: #fff; cursor: pointer; }}
-    .contract-item.active {{ border-color: #b08a43; box-shadow: 0 0 0 2px rgba(176,138,67,0.14); }}
+    body {{
+      margin: 0;
+      background:
+        radial-gradient(circle at 8% 0%, rgba(11,95,231,0.055), transparent 30%),
+        linear-gradient(180deg, #fbfaf7 0%, var(--canvas) 100%);
+      color: var(--ink);
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+    }}
+    button, input, textarea {{ font: inherit; }}
+    .site-header {{
+      min-height: 76px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 28px;
+      padding: 0 max(32px, calc((100vw - 1296px) / 2));
+      border-bottom: 1px solid rgba(17,23,34,0.1);
+      background: rgba(251,250,247,0.9);
+      backdrop-filter: blur(18px);
+    }}
+    .brand {{ display: inline-flex; align-items: center; gap: 12px; color: var(--ink); text-decoration: none; }}
+    .brand img {{ width: 36px; height: 36px; border-radius: 9px; }}
+    .brand strong {{ font-size: 22px; letter-spacing: -0.05em; }}
+    .site-nav {{ display: flex; align-items: center; gap: 34px; }}
+    .site-nav a {{ position: relative; padding: 28px 0 25px; color: #5c6573; font-size: 14px; font-weight: 700; text-decoration: none; }}
+    .site-nav a:hover, .site-nav a.active {{ color: var(--blue); }}
+    .site-nav a.active::after {{ content: ""; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--blue); }}
+    .shell {{ width: min(1296px, calc(100% - 48px)); margin: 0 auto; padding: 54px 0 64px; }}
+    .topbar {{ display: flex; justify-content: space-between; gap: 32px; align-items: end; margin-bottom: 30px; padding-bottom: 26px; border-bottom: 1px solid var(--line); }}
+    .eyebrow {{ margin: 0 0 12px; color: var(--blue); font-size: 11px; font-weight: 800; letter-spacing: 0.2em; text-transform: uppercase; }}
+    h1 {{ margin: 0; font-family: "Songti SC", SimSun, serif; font-size: clamp(38px, 4vw, 58px); line-height: 1.05; letter-spacing: -0.07em; }}
+    .lead {{ max-width: 760px; margin: 14px 0 0; color: var(--muted); line-height: 1.8; }}
+    .back-link {{ color: var(--blue); font-size: 14px; font-weight: 800; text-decoration: none; white-space: nowrap; }}
+    .layout {{ display: grid; grid-template-columns: 324px minmax(0, 1fr); gap: 20px; align-items: start; }}
+    .panel {{ background: var(--surface); border: 1px solid var(--line); border-radius: 4px; box-shadow: 0 20px 48px rgba(39,53,75,0.055); backdrop-filter: blur(16px); }}
+    .list-panel {{ padding: 18px; position: sticky; top: 18px; }}
+    .form-panel {{ padding: 24px; }}
+    .list-head {{ display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }}
+    .list-head strong {{ font-family: "Songti SC", SimSun, serif; font-size: 20px; }}
+    .list {{ display: grid; gap: 8px; max-height: calc(100vh - 184px); overflow: auto; padding-right: 3px; }}
+    .contract-item {{ width: 100%; text-align: left; padding: 15px 14px; border: 1px solid transparent; border-radius: 3px; background: rgba(255,255,255,0.58); cursor: pointer; transition: 160ms ease; }}
+    .contract-item:hover {{ border-color: #c8d3e4; transform: translateY(-1px); }}
+    .contract-item.active {{ border-color: rgba(11,95,231,0.5); background: var(--blue-soft); box-shadow: inset 3px 0 0 var(--blue); }}
     .contract-item strong, .contract-item span {{ display: block; }}
-    .contract-item strong {{ font-size: 14px; line-height: 1.5; }}
-    .contract-item span {{ margin-top: 6px; color: #697385; font-size: 12px; line-height: 1.5; }}
-    .empty {{ padding: 16px; border: 1px dashed #ccd4df; border-radius: 10px; color: #697385; background: #fafbfd; }}
-    .toolbar {{ display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }}
-    .button-primary, .button-secondary, .button-danger {{ min-height: 42px; border-radius: 8px; padding: 0 16px; font-size: 14px; font-weight: 700; cursor: pointer; }}
-    .button-primary {{ border: 0; color: #fff; background: #111722; }}
-    .button-secondary {{ border: 1px solid #cfd6e0; background: #fff; color: #1a2230; }}
-    .button-danger {{ border: 1px solid #e0c2c2; background: #fff7f7; color: #a23d3d; }}
-    .status {{ min-height: 24px; margin-bottom: 12px; color: #5a6678; }}
-    .status.error {{ color: #b13e3e; }}
-    .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }}
+    .contract-item strong {{ font-size: 14px; line-height: 1.55; }}
+    .contract-item span {{ margin-top: 7px; color: var(--muted); font-size: 12px; line-height: 1.55; }}
+    .empty {{ padding: 18px; border: 1px dashed #c9d1dd; border-radius: 3px; color: var(--muted); background: rgba(255,255,255,0.48); }}
+    .toolbar {{ display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; }}
+    .button-primary, .button-secondary, .button-danger {{ min-height: 42px; border-radius: 3px; padding: 0 18px; font-size: 14px; font-weight: 800; cursor: pointer; transition: 160ms ease; }}
+    .button-primary {{ border: 1px solid var(--blue); color: #fff; background: var(--blue); }}
+    .button-secondary {{ border: 1px solid #cbd3df; background: rgba(255,255,255,0.82); color: var(--ink); }}
+    .button-danger {{ border: 1px solid rgba(217,64,74,0.3); background: #fff7f6; color: var(--danger); }}
+    .button-primary:hover, .button-secondary:hover, .button-danger:hover {{ transform: translateY(-1px); box-shadow: 0 10px 24px rgba(39,53,75,0.1); }}
+    .status {{ min-height: 38px; margin-bottom: 18px; padding: 10px 12px; border-left: 3px solid var(--gold); color: #596475; background: rgba(255,249,232,0.7); font-size: 13px; }}
+    .status.error {{ border-left-color: var(--danger); color: #b13e3e; background: #fff6f6; }}
+    .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }}
     .field {{ display: grid; gap: 8px; }}
     .field.full {{ grid-column: 1 / -1; }}
-    label {{ font-size: 13px; font-weight: 700; color: #364152; }}
-    input, textarea {{ width: 100%; border: 1px solid #cfd6e0; border-radius: 8px; padding: 12px 13px; font: inherit; color: inherit; background: #fff; }}
-    textarea {{ min-height: 120px; resize: vertical; line-height: 1.7; }}
-    .meta {{ margin-top: 16px; color: #6d7685; font-size: 12px; }}
+    label {{ font-size: 13px; font-weight: 800; color: #354052; }}
+    input, textarea {{ width: 100%; border: 1px solid #cfd6e0; border-radius: 3px; padding: 12px 13px; color: inherit; background: rgba(255,255,255,0.88); outline: none; transition: 160ms ease; }}
+    input:focus, textarea:focus {{ border-color: var(--blue); box-shadow: 0 0 0 3px rgba(11,95,231,0.1); background: #fff; }}
+    textarea {{ min-height: 120px; resize: vertical; line-height: 1.75; }}
+    .meta {{ margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }}
     @media (max-width: 980px) {{
+      .site-header {{ padding: 0 24px; }}
+      .site-nav {{ display: none; }}
+      .shell {{ width: min(100% - 28px, 760px); padding-top: 34px; }}
+      .topbar {{ align-items: start; }}
       .layout {{ grid-template-columns: 1fr; }}
       .list-panel {{ position: static; }}
+      .list {{ max-height: 360px; }}
       .grid {{ grid-template-columns: 1fr; }}
+    }}
+    @media (max-width: 640px) {{
+      .site-header {{ min-height: 64px; padding: 0 16px; }}
+      .brand img {{ width: 32px; height: 32px; }}
+      .shell {{ width: calc(100% - 20px); padding: 26px 0 40px; }}
+      .topbar {{ display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }}
+      .topbar > div {{ min-width: 0; }}
+      .lead {{ overflow-wrap: anywhere; }}
+      h1 {{ font-size: 38px; }}
+      .form-panel {{ padding: 16px; }}
+      .field.full {{ grid-column: auto; }}
     }}
   </style>
 </head>
 <body>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="策标首页">
+      <img src="/static/frontend/brand-mark-color.png" alt="">
+      <strong>策标</strong>
+    </a>
+    <nav class="site-nav" aria-label="网站导航">
+      <a href="/">首页</a>
+      <a href="/product/">产品功能</a>
+      <a href="/solutions/">解决方案</a>
+      <a href="/process/">AI分析流程</a>
+      <a href="/scenes/">应用场景</a>
+      <a class="active" href="/contracts/">合同库</a>
+    </nav>
+  </header>
   <div class="shell">
     <div class="topbar">
       <div>
+        <p class="eyebrow">REFERENCE LIBRARY</p>
         <h1>合同库</h1>
         <p class="lead">管理合同/标书参考资料，支持新增、编辑、删除，并沉淀风险、评分规则与材料清单。</p>
       </div>
-      <a class="back-link" href="/">返回首页</a>
+      <a class="back-link" href="/">返回工作台 →</a>
     </div>
     <div class="layout">
       <aside class="panel list-panel">
@@ -1217,6 +2309,36 @@ def _parse_date(value):
         return None
 
 
+def _parse_report_deadline(value):
+    value = str(value or '').strip()
+    if not value:
+        return None
+
+    normalized = value.replace('：', ':')
+    try:
+        parsed = datetime.fromisoformat(normalized.replace('Z', '+00:00'))
+        if timezone.is_naive(parsed):
+            return timezone.make_aware(parsed, timezone.get_current_timezone())
+        return parsed
+    except ValueError:
+        pass
+    formats = (
+        '%Y-%m-%d %H:%M',
+        '%Y-%m-%dT%H:%M:%S',
+        '%Y-%m-%dT%H:%M',
+        '%Y年%m月%d日%H:%M',
+        '%Y年%m月%d日',
+    )
+    for date_format in formats:
+        candidate = normalized.replace(' ', '') if '年' in date_format else normalized
+        try:
+            parsed = datetime.strptime(candidate, date_format)
+            return timezone.make_aware(parsed, timezone.get_current_timezone())
+        except ValueError:
+            continue
+    return None
+
+
 def _split_profile_text(value):
     return [item.strip() for item in str(value or '').replace('\n', '、').replace(',', '、').replace('，', '、').split('、') if item.strip()]
 
@@ -1227,7 +2349,9 @@ def _save_agent_report(tender_text, company, report):
         name=report.get('project_name') or '未命名招标项目',
         procurement_method=report.get('procurement_method') or '',
         project_type=report.get('project_type') or '',
+        region=report.get('region') or '',
         budget_amount=report.get('budget_amount'),
+        deadline=_parse_report_deadline(report.get('deadline')),
         source_text=tender_text,
         status=TenderProject.Status.ANALYZED,
     )
@@ -1236,7 +2360,8 @@ def _save_agent_report(tender_text, company, report):
 
 
 def _create_analysis_report(project, report):
-    return AnalysisReport.objects.create(
+    _ensure_project_task_schema()
+    analysis_report = AnalysisReport.objects.create(
         tender_project=project,
         decision=_map_decision(report.get('decision')),
         match_score=report.get('match_score') or 0,
@@ -1246,6 +2371,8 @@ def _create_analysis_report(project, report):
         next_actions=report.get('next_actions') or [],
         raw_report=report,
     )
+    sync_report_tasks(analysis_report)
+    return analysis_report
 
 
 def _map_decision(decision):
@@ -1256,4 +2383,3 @@ def _map_decision(decision):
         '人工复核': AnalysisReport.Decision.NEEDS_REVIEW,
     }
     return mapping.get(decision, AnalysisReport.Decision.NEEDS_REVIEW)
-

@@ -66,7 +66,23 @@ export function buildWorkspaceMetrics(projects) {
 export function buildRiskReminders(projects) {
   const highRiskProjects = projects.filter((project) => project.risk_level === '高')
   const recommendedProjects = projects.filter((project) => project.decision === 'recommended')
+  const overdueTasks = projects.reduce((sum, project) => sum + Number(project.overdue_task_count || 0), 0)
+  const pendingTasks = projects.reduce((sum, project) => sum + Number(project.pending_task_count || 0), 0)
   const reminders = []
+
+  if (overdueTasks) {
+    reminders.push({
+      level: 'high',
+      title: `${overdueTasks} 项任务已逾期`,
+      description: '请优先处理材料补齐、保证金和投标截止相关任务。',
+    })
+  } else if (pendingTasks) {
+    reminders.push({
+      level: 'medium',
+      title: `${pendingTasks} 项投标任务待处理`,
+      description: 'AI 报告动作已进入项目工作台，可逐项完成并跟踪截止时间。',
+    })
+  }
 
   if (highRiskProjects.length) {
     reminders.push({

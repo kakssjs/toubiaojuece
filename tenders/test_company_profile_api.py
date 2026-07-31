@@ -26,6 +26,15 @@ class CompanyProfileApiTests(TestCase):
         self.assertEqual(payload["company"]["qualifications"][0]["name"], "ISO9001")
         self.assertEqual(payload["company"]["experiences"][0]["name"], "智慧园区平台建设项目")
 
+    def test_company_profile_api_prefers_xiaosu_as_default_company(self):
+        CompanyProfile.objects.create(name="云衡数据科技有限公司")
+        CompanyProfile.objects.create(name="小苏科技有限公司")
+
+        response = self.client.get("/api/company-profile/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["company"]["name"], "小苏科技有限公司")
+
     def test_company_profile_api_saves_company_capabilities(self):
         payload = {
             "name": "小苏科技",
