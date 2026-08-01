@@ -4,6 +4,7 @@ import urllib.error
 import urllib.request
 
 from .tender_analysis_agent import TenderAnalysisAgent as RuleBasedTenderAnalysisAgent
+from tenders.services.openai_config import openai_responses_url, openai_user_agent
 
 
 class HybridTenderAnalysisAgent:
@@ -69,17 +70,18 @@ class HybridTenderAnalysisAgent:
         }
 
         request = urllib.request.Request(
-            "https://api.openai.com/v1/responses",
+            openai_responses_url(),
             data=json.dumps(payload).encode("utf-8"),
             headers={
                 "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY', '').strip()}",
                 "Content-Type": "application/json",
+                "User-Agent": openai_user_agent(),
             },
             method="POST",
         )
         timeout = int(os.getenv("OPENAI_ANALYSIS_TIMEOUT", "45"))
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310 - URL validated as HTTPS
                 response_payload = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore")[:300]

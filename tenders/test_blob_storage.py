@@ -137,7 +137,7 @@ class ClientBlobAnalysisTests(TestCase):
                 '/api/agent/analyze-blob/',
                 data=json.dumps({
                     'company_id': self.company.id,
-                    'pathname': 'client-tender-documents/123/sample-random.pdf',
+                    'pathname': f'client-tender-documents/company-{self.company.id}/sample-random.pdf',
                     'original_name': '大型招标文件.pdf',
                 }),
                 content_type='application/json',
@@ -148,6 +148,6 @@ class ClientBlobAnalysisTests(TestCase):
         self.assertTrue(payload['ok'])
         self.assertEqual(payload['storage']['backend'], 'vercel_blob')
         document = TenderDocument.objects.get(id=payload['document_id'])
-        self.assertEqual(document.file.name, 'client-tender-documents/123/sample-random.pdf')
+        self.assertEqual(document.file.name, f'client-tender-documents/company-{self.company.id}/sample-random.pdf')
         self.assertEqual(document.parse_status, TenderDocument.ParseStatus.PARSED)
         self.assertTrue(AnalysisReport.objects.filter(id=payload['report_id']).exists())

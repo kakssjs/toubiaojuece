@@ -22,6 +22,16 @@ class ContractApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload['ok'], True)
         self.assertGreaterEqual(len(payload['contracts']), 2)
+        self.assertEqual(payload['total'], Contract.objects.count())
+        self.assertIn('s-maxage=300', response['Cache-Control'])
+
+    def test_contracts_api_limit_reduces_homepage_payload(self):
+        response = self.client.get('/api/contracts/?limit=1')
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload['contracts']), 1)
+        self.assertEqual(payload['total'], Contract.objects.count())
 
     def test_contracts_api_can_create_contract(self):
         response = self.client.post(
