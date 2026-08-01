@@ -41,7 +41,11 @@ class PdfParserTests(SimpleTestCase):
                 patch('tenders.services.pdf_parser.extract_pdf_text', return_value=''),
                 patch.dict(
                     'os.environ',
-                    {'OPENAI_API_KEY': 'sk-test-key-for-pdf-vision', 'OPENAI_PDF_VISION_ENABLED': '1'},
+                    {
+                        'OPENAI_API_KEY': 'sk-test-key-for-pdf-vision',
+                        'OPENAI_API_BASE': 'https://relay.example.com/v1',
+                        'OPENAI_PDF_VISION_ENABLED': '1',
+                    },
                     clear=False,
                 ),
                 patch('tenders.services.pdf_parser.urllib.request.urlopen', return_value=response) as urlopen,
@@ -49,6 +53,11 @@ class PdfParserTests(SimpleTestCase):
                 result = extract_pdf_content(str(pdf_path), 'scan.pdf')
 
         self.assertEqual(result['method'], 'openai_vision')
+        self.assertEqual(urlopen.call_args.args[0].full_url, 'https://relay.example.com/v1/responses')
+        self.assertEqual(
+            urlopen.call_args.args[0].get_header('User-agent'),
+            'Mozilla/5.0 (compatible; Cebiao/1.0)',
+        )
         self.assertTrue(result['used_vision'])
         self.assertIn('扫描件识别', result['text'])
         request_payload = json.loads(urlopen.call_args.args[0].data.decode('utf-8'))

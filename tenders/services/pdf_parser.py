@@ -6,8 +6,14 @@ import re
 import urllib.error
 import urllib.request
 
+from .openai_config import openai_responses_url, openai_user_agent, validated_https_api_base
+
 from pypdf import PdfReader
 from PIL import Image
+
+
+MAX_PDF_PAGES = int(os.getenv('MAX_PDF_PAGES', '300'))
+MAX_EXTRACTED_TEXT_CHARACTERS = int(os.getenv('MAX_EXTRACTED_TEXT_CHARACTERS', '500000'))
 
 
 OCR_UNAVAILABLE_MESSAGE = '扫描版 PDF 需要 OCR 服务，当前视觉识别不可用，请稍后重试。'
@@ -15,12 +21,18 @@ OCR_UNAVAILABLE_MESSAGE = '扫描版 PDF 需要 OCR 服务，当前视觉识别�
 
 def extract_pdf_text(file_path):
     reader = PdfReader(file_path)
+    if len(reader.pages) > MAX_PDF_PAGES:
+        raise ValueError(f'PDF 页数不能超过 {MAX_PDF_PAGES} 页。')
     parts = []
+    extracted_characters = 0
 
     for page_number, page in enumerate(reader.pages, start=1):
         page_text = page.extract_text() or ''
         page_text = page_text.strip()
         if page_text:
+            extracted_characters += len(page_text)
+            if extracted_characters > MAX_EXTRACTED_TEXT_CHARACTERS:
+                raise ValueError('PDF 可提取文本过长，请拆分文件后重试。')
             parts.append(f'第{page_number}页\n{page_text}')
 
     if not parts:
@@ -127,17 +139,18 @@ def _call_openai_pdf_vision(file_path, filename):
         'max_output_tokens': int(os.getenv('OPENAI_PDF_MAX_OUTPUT_TOKENS', '12000')),
     }
     request = urllib.request.Request(
-        'https://api.openai.com/v1/responses',
+        openai_responses_url(),
         data=json.dumps(payload).encode('utf-8'),
         headers={
             'Authorization': f"Bearer {os.getenv('OPENAI_API_KEY', '').strip()}",
             'Content-Type': 'application/json',
+            'User-Agent': openai_user_agent(),
         },
         method='POST',
     )
 
     try:
-        with urllib.request.urlopen(
+        with urllib.request.urlopen(  # nosec B310 - URL validated as HTTPS
             request,
             timeout=int(os.getenv('OPENAI_PDF_TIMEOUT', '60')),
         ) as response:
@@ -191,7 +204,10 @@ def _call_agnes_pdf_vision(file_path, filename):
             'messages': [{'role': 'user', 'content': content}],
             'temperature': 0,
         }
-        base_url = os.getenv('AGNES_API_BASE', 'https://apihub.agnes-ai.com/v1').rstrip('/')
+        base_url = validated_https_api_base(
+            os.getenv('AGNES_API_BASE', 'https://apihub.agnes-ai.com/v1'),
+            'AGNES_API_BASE',
+        )
         request = urllib.request.Request(
             f'{base_url}/chat/completions',
             data=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
@@ -202,7 +218,7 @@ def _call_agnes_pdf_vision(file_path, filename):
             method='POST',
         )
         try:
-            with urllib.request.urlopen(
+            with urllib.request.urlopen(  # nosec B310 - URL validated as HTTPS
                 request,
                 timeout=int(os.getenv('AGNES_PDF_TIMEOUT', '90')),
             ) as response:

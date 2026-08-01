@@ -5,6 +5,7 @@ import urllib.request
 
 from .openai_tender_analysis_agent import HybridTenderAnalysisAgent
 from .tender_analysis_agent import TenderAnalysisAgent as RuleBasedTenderAnalysisAgent
+from tenders.services.openai_config import validated_https_api_base
 
 
 class AgnesTenderAnalysisAgent(HybridTenderAnalysisAgent):
@@ -66,7 +67,10 @@ class AgnesTenderAnalysisAgent(HybridTenderAnalysisAgent):
             'response_format': {'type': 'json_object'},
             'temperature': 0.2,
         }
-        base_url = os.getenv('AGNES_API_BASE', 'https://apihub.agnes-ai.com/v1').rstrip('/')
+        base_url = validated_https_api_base(
+            os.getenv('AGNES_API_BASE', 'https://apihub.agnes-ai.com/v1'),
+            'AGNES_API_BASE',
+        )
         request = urllib.request.Request(
             f'{base_url}/chat/completions',
             data=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
@@ -78,7 +82,7 @@ class AgnesTenderAnalysisAgent(HybridTenderAnalysisAgent):
         )
         timeout = int(os.getenv('AGNES_ANALYSIS_TIMEOUT', '60'))
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310 - URL validated as HTTPS
                 response_payload = json.loads(response.read().decode('utf-8'))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode('utf-8', errors='ignore')[:300]

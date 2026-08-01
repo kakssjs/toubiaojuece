@@ -28,7 +28,7 @@
         <strong class="workspace-score">{{ project.match_score ?? '—' }}</strong>
         <span :class="riskClass(project.risk_level)">{{ normalizedRisk(project.risk_level) }}</span>
         <b :class="decisionClass(project.decision)">{{ project.decision_label || '待评估' }}</b>
-        <span class="workspace-next-action">完善材料并推进 <ChevronRightIcon /></span>
+        <span class="workspace-next-action">{{ nextAction(project) }} <ChevronRightIcon /></span>
       </a>
     </div>
     <div v-else class="workspace-empty">
@@ -55,5 +55,13 @@ function formatBudget(value) {
 function normalizedRisk(value) {
   if (['高', '中', '低'].includes(value)) return value
   return '待核验'
+}
+
+function nextAction(project) {
+  if (project.decision === 'not_recommended') return '记录放弃原因'
+  if (project.risk_level === '高') return '优先复核风险'
+  if (project.overdue_task_count) return '处理逾期任务'
+  if (project.pending_task_count) return '跟进待办任务'
+  return '完善材料并推进'
 }
 </script>

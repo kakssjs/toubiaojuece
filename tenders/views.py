@@ -16,7 +16,7 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import connection, transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.middleware.csrf import get_token
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.utils import timezone
@@ -27,7 +27,10 @@ from .agents import AgnesTenderAnalysisAgent, RuleBasedTenderAnalysisAgent, Tend
 from .models import (
     AnalysisReport,
     CompanyProfile,
+    CommunityArticle,
+    CommunityPost,
     Contract,
+    HistoricalBidCase,
     ProjectExperience,
     ProjectNote,
     ProjectTask,
@@ -54,7 +57,11 @@ _PROJECT_TASK_SCHEMA_READY = False
 
 JSON_UTF8_CONTENT_TYPE = 'application/json; charset=utf-8'
 _DEMO_DATA_ENSURED = False
+_HISTORICAL_BID_DATA_ENSURED = False
+_REFERENCE_DATA_ENSURED = False
 ANALYSIS_MODES = {'rule_based', 'openai', 'agnes'}
+MAX_TENDER_TEXT_CHARACTERS = int(os.getenv('MAX_TENDER_TEXT_CHARACTERS', '500000'))
+MAX_PDF_UPLOAD_BYTES = int(os.getenv('MAX_PDF_UPLOAD_BYTES', str(50 * 1024 * 1024)))
 
 
 def utf8_json(data, **kwargs):
@@ -108,6 +115,40 @@ def _resolve_analysis_mode(value):
     return mode if mode in ANALYSIS_MODES else None
 
 
+def _find_similar_reference_tenders(tender_text, limit=3):
+    """Return the most relevant local templates using deterministic keyword retrieval."""
+    normalized_text = re.sub(r"\s+", "", str(tender_text or "")).casefold()
+    matches = []
+    for reference in TenderReference.objects.all():
+        tag_terms = [term.strip() for term in re.split(r"[、,，/\s]+", reference.tags or "") if len(term.strip()) >= 2]
+        weighted_terms = [
+            (reference.project_type, 5),
+            (reference.industry, 4),
+            (reference.region, 1),
+            *[(term, 3) for term in tag_terms],
+        ]
+        score = sum(weight for term, weight in weighted_terms if term and str(term).casefold() in normalized_text)
+        if score <= 0:
+            continue
+        matches.append((score, reference))
+
+    matches.sort(key=lambda item: (item[0], item[1].is_featured, item[1].id), reverse=True)
+    return [
+        {
+            'id': reference.id,
+            'title': reference.title,
+            'project_type': reference.project_type,
+            'industry': reference.industry,
+            'region': reference.region,
+            'summary': reference.summary,
+            'reference_points': reference.reference_points,
+            'tags': reference.tags,
+            'match_score': score,
+        }
+        for score, reference in matches[:limit]
+    ]
+
+
 def _analyze_tender(tender_text, company_profile, analysis_mode):
     agents = {
         'rule_based': RuleBasedTenderAnalysisAgent,
@@ -116,6 +157,17 @@ def _analyze_tender(tender_text, company_profile, analysis_mode):
     }
     agent = agents[analysis_mode]()
     report = agent.analyze(tender_text=tender_text, company_profile=company_profile)
+    if analysis_mode == 'rule_based':
+        reference_matches = _find_similar_reference_tenders(tender_text)
+        report['reference_matches'] = reference_matches
+        if reference_matches:
+            findings = list(report.get('key_findings') or [])
+            findings.extend(
+                f"相似标书参考：{item['title']}。{item['reference_points']}"
+                for item in reference_matches[:2]
+            )
+            report['key_findings'] = findings
+            report.setdefault('agent_trace', []).append({'agent': '本地参考标书检索Agent', 'status': 'completed'})
     report.setdefault('analysis_engine', 'rule_based')
     return report
 
@@ -459,12 +511,35 @@ def _ensure_demo_data_available():
         CompanyProfile.objects.count() >= 3
         and TenderProject.objects.count() >= 10
         and AnalysisReport.objects.count() >= 10
-        and Contract.objects.count() >= 15
-        and TenderReference.objects.count() >= 10
+        and Contract.objects.count() >= 50
+        and TenderReference.objects.count() >= 50
     )
     if not has_enough_data:
         call_command('seed_workspace_demo', verbosity=0)
     _DEMO_DATA_ENSURED = True
+
+
+def _ensure_reference_data_available():
+    global _REFERENCE_DATA_ENSURED
+    if _REFERENCE_DATA_ENSURED or not getattr(settings, 'AUTO_SEED_DEMO_DATA', False):
+        return
+    if Contract.objects.count() < 50 or TenderReference.objects.count() < 50:
+        call_command('seed_reference_templates', verbosity=0)
+    _REFERENCE_DATA_ENSURED = True
+
+
+def _ensure_historical_bid_data_available():
+    global _HISTORICAL_BID_DATA_ENSURED
+    if _HISTORICAL_BID_DATA_ENSURED:
+        return
+    if HistoricalBidCase._meta.db_table not in connection.introspection.table_names():
+        call_command('migrate', 'tenders', verbosity=0, interactive=False)
+    _HISTORICAL_BID_DATA_ENSURED = True
+
+
+def _cache_public_library_response(response):
+    response['Cache-Control'] = 'public, max-age=60, s-maxage=300, stale-while-revalidate=86400'
+    return response
 
 
 def frontend_app(request, *args, **kwargs):
@@ -472,11 +547,18 @@ def frontend_app(request, *args, **kwargs):
     if not index_path.exists():
         raise Http404('Vue frontend has not been built yet.')
 
-    return FileResponse(index_path.open('rb'), content_type='text/html')
+    response = FileResponse(index_path.open('rb'), content_type='text/html')
+    response['Cache-Control'] = 'no-cache'
+    return response
 
 
 def frontend_static(request, path):
-    return serve(request, path, document_root=Path(settings.BASE_DIR) / 'static' / 'frontend')
+    response = serve(request, path, document_root=Path(settings.BASE_DIR) / 'static' / 'frontend')
+    if '/assets/' in f'/{path}':
+        response['Cache-Control'] = 'public, max-age=31536000, immutable'
+    else:
+        response['Cache-Control'] = 'public, max-age=3600'
+    return response
 
 
 def download_tender_document(request, document_id):
@@ -533,38 +615,39 @@ def system_status(request):
         available_modes.append('openai')
     if agnes_enabled:
         available_modes.append('agnes')
-    assigned_company_count = CompanyProfile.objects.filter(owner__isnull=False).count()
-    total_company_count = CompanyProfile.objects.count()
-
-    return utf8_json(
-        {
-            'ok': True,
-            'analysis': {
-                'mode': 'user_selected',
-                'default_mode': 'rule_based',
-                'available_modes': available_modes,
-                'openai_configured': openai_configured,
-                'openai_enabled': openai_enabled,
-                'model': os.getenv('OPENAI_ANALYSIS_MODEL', 'gpt-5.6'),
-                'agnes_configured': agnes_configured,
-                'agnes_enabled': agnes_enabled,
-                'agnes_model': os.getenv('AGNES_ANALYSIS_MODEL', 'agnes-2.0-flash'),
-                'fallback_enabled': True,
-            },
-            'ownership': {
-                'assigned_companies': assigned_company_count,
-                'unassigned_companies': max(total_company_count - assigned_company_count, 0),
-            },
-            'data': {
-                'companies': CompanyProfile.objects.count(),
-                'projects': TenderProject.objects.count(),
-                'reports': AnalysisReport.objects.count(),
-                'contracts': Contract.objects.count(),
-                'reference_tenders': TenderReference.objects.count(),
-            },
+    payload = {
+        'ok': True,
+        'analysis': {
+            'mode': 'user_selected',
+            'default_mode': 'rule_based',
+            'available_modes': available_modes,
+            'fallback_enabled': True,
         },
-        json_dumps_params={'ensure_ascii': False},
-    )
+    }
+    if request.user.is_authenticated:
+        payload['analysis'].update({
+            'openai_configured': openai_configured,
+            'openai_enabled': openai_enabled,
+            'model': os.getenv('OPENAI_ANALYSIS_MODEL', 'gpt-5.6'),
+            'agnes_configured': agnes_configured,
+            'agnes_enabled': agnes_enabled,
+            'agnes_model': os.getenv('AGNES_ANALYSIS_MODEL', 'agnes-2.0-flash'),
+        })
+    if request.user.is_authenticated and request.user.is_staff:
+        assigned_company_count = CompanyProfile.objects.filter(owner__isnull=False).count()
+        total_company_count = CompanyProfile.objects.count()
+        payload['ownership'] = {
+            'assigned_companies': assigned_company_count,
+            'unassigned_companies': max(total_company_count - assigned_company_count, 0),
+        }
+        payload['data'] = {
+            'companies': CompanyProfile.objects.count(),
+            'projects': TenderProject.objects.count(),
+            'reports': AnalysisReport.objects.count(),
+            'contracts': Contract.objects.count(),
+            'reference_tenders': TenderReference.objects.count(),
+        }
+    return utf8_json(payload)
 
 
 @require_POST
@@ -580,6 +663,8 @@ def analyze_tender_agent(request):
     tender_text = str(payload.get('tender_text') or '').strip()
     if not tender_text:
         return utf8_json({'ok': False, 'error': 'tender_text 不能为空。'}, status=400)
+    if len(tender_text) > MAX_TENDER_TEXT_CHARACTERS:
+        return utf8_json({'ok': False, 'error': '招标文本过长，请上传 PDF 或精简后重试。'}, status=413)
 
     analysis_mode = _resolve_analysis_mode(payload.get('analysis_mode'))
     if analysis_mode is None:
@@ -635,6 +720,7 @@ def list_companies(request):
 
 
 def company_profile_detail(request):
+    _ensure_company_ai_profile_schema()
     auth_error = _authentication_error(request)
     if auth_error:
         return auth_error
@@ -674,6 +760,10 @@ def company_profile_detail(request):
 
     company.name = name
     company.main_business = str(payload.get('main_business') or '').strip()
+    company.industry = str(payload.get('industry') or '').strip()
+    company.registered_capital = payload.get('registered_capital') or None
+    company.employee_scale = str(payload.get('employee_scale') or '').strip()
+    company.capability_tags = str(payload.get('capability_tags') or '').strip()
     company.service_regions = str(payload.get('service_regions') or '').strip()
     company.max_project_amount = payload.get('max_project_amount') or None
     company.forbidden_conditions = str(payload.get('forbidden_conditions') or '').strip()
@@ -698,6 +788,14 @@ def _default_company_queryset(request):
     if preferred.exists():
         return preferred.order_by('name')
     return queryset.order_by('name')
+
+
+def _ensure_company_ai_profile_schema():
+    table_name = CompanyProfile._meta.db_table
+    with connection.cursor() as cursor:
+        columns = {column.name for column in connection.introspection.get_table_description(cursor, table_name)}
+    if 'capability_tags' not in columns:
+        call_command('migrate', 'tenders', verbosity=0, interactive=False)
 
 
 def project_dashboard(request):
@@ -757,7 +855,7 @@ def recent_projects(request):
 
 
 def list_reference_tenders(request):
-    _ensure_demo_data_available()
+    _ensure_reference_data_available()
     references = TenderReference.objects.all()
     project_type = str(request.GET.get('project_type') or '').strip()
     industry = str(request.GET.get('industry') or '').strip()
@@ -773,37 +871,241 @@ def list_reference_tenders(request):
     rows = [_serialize_reference_tender(item) for item in references]
 
     if _prefers_html(request):
-        return HttpResponse(_reference_tenders_html(rows), content_type='text/html; charset=utf-8')
+        return _cache_public_library_response(
+            HttpResponse(_reference_tenders_html(rows), content_type='text/html; charset=utf-8')
+        )
 
-    return utf8_json(
+    return _cache_public_library_response(utf8_json(
         {
             'ok': True,
             'references': rows,
         },
         json_dumps_params={'ensure_ascii': False},
-    )
+    ))
 
 
 def contracts_page(request):
-    _ensure_demo_data_available()
+    _ensure_reference_data_available()
     contracts = [_serialize_contract(item) for item in Contract.objects.all()]
     return HttpResponse(_contracts_page_html(contracts), content_type='text/html; charset=utf-8')
+
+
+@require_http_methods(['GET'])
+def historical_bid_cases(request):
+    _ensure_historical_bid_data_available()
+    queryset = HistoricalBidCase.objects.all()
+    industry = str(request.GET.get('industry') or '').strip()
+    year = str(request.GET.get('year') or '').strip()
+    if industry:
+        queryset = queryset.filter(industry=industry)
+    if year.isdigit():
+        queryset = queryset.filter(year=int(year))
+
+    total = queryset.count()
+    try:
+        limit = min(max(int(request.GET.get('limit', 12) or 12), 1), 50)
+    except (TypeError, ValueError):
+        limit = 12
+    rows = list(queryset[:limit])
+    cases = [{
+        'id': item.id,
+        'title': item.title,
+        'industry': item.industry,
+        'region': item.region,
+        'year': item.year,
+        'budget_amount': float(item.budget_amount),
+        'winning_company': item.winning_company,
+        'participant_count': item.participant_count,
+        'average_bid_amount': float(item.average_bid_amount),
+        'winning_bid_amount': float(item.winning_bid_amount),
+        'summary': item.summary,
+        'tags': item.tags,
+    } for item in rows]
+    industry_rows = HistoricalBidCase.objects.values('industry').annotate(count=Count('id')).order_by('-count', 'industry')
+    return _cache_public_library_response(utf8_json({
+        'ok': True,
+        'cases': cases,
+        'total': total,
+        'industries': list(industry_rows),
+    }, json_dumps_params={'ensure_ascii': False}))
+
+
+@require_http_methods(['GET'])
+def project_radar(request):
+    _ensure_reference_data_available()
+    references = TenderReference.objects.all()[:12]
+    company = _default_company_queryset(request).first() if request.user.is_authenticated else None
+    profile_text = ' '.join(filter(None, [getattr(company, 'main_business', ''), getattr(company, 'capability_tags', ''), getattr(company, 'service_regions', '')])).lower()
+    rows = []
+    for item in references:
+        item_text = f'{item.title} {item.industry} {item.project_type} {item.tags} {item.region}'.lower()
+        overlaps = sum(1 for term in _split_profile_text(profile_text) if term and term.lower() in item_text)
+        match_score = min(96, 72 + overlaps * 6 + (5 if item.is_featured else 0))
+        rows.append({
+            'id': item.id, 'title': item.title, 'industry': item.industry, 'region': item.region,
+            'issuing_organization': item.issuing_organization,
+            'budget_amount': float(item.budget_amount) if item.budget_amount is not None else None,
+            'published_at': item.published_at.isoformat() if item.published_at else '',
+            'match_score': match_score,
+            'recommendation': '立即关注' if match_score >= 88 else '建议跟进' if match_score >= 80 else '持续观察',
+        })
+    rows.sort(key=lambda row: row['match_score'], reverse=True)
+    return _cache_public_library_response(utf8_json({'ok': True, 'projects': rows, 'total': TenderReference.objects.count(), 'coverage_note': '平台招标参考库'}, json_dumps_params={'ensure_ascii': False}))
+
+
+@require_http_methods(['POST'])
+def bid_prediction(request):
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
+    payload = _load_json_payload(request)
+    if isinstance(payload, JsonResponse):
+        return payload
+    participants = payload.get('participants') or []
+    if not participants:
+        participants = [{'name': '您的企业', 'strength': 82, 'price': 78, 'technical': 86, 'regional': 72}]
+    weighted = []
+    for item in participants[:8]:
+        raw = sum(float(item.get(key, 70) or 70) * weight for key, weight in [('strength', .30), ('price', .25), ('technical', .30), ('regional', .15)])
+        weighted.append({'name': str(item.get('name') or '参投企业'), 'raw': max(1, raw)})
+    total_raw = sum(item['raw'] for item in weighted) or 1
+    predictions = [{'name': item['name'], 'probability': round(item['raw'] / total_raw * 100)} for item in weighted]
+    predictions.sort(key=lambda item: item['probability'], reverse=True)
+    return utf8_json({'ok': True, 'predictions': predictions, 'model_note': '基于企业实力、报价竞争力、技术方案与地区经验的可解释评分模型'}, json_dumps_params={'ensure_ascii': False})
+
+
+@require_http_methods(['POST'])
+def generate_bid_outline(request):
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
+    payload = _load_json_payload(request)
+    if isinstance(payload, JsonResponse):
+        return payload
+    project = _projects_for_request(request).select_related('company', 'analysis_report').filter(id=payload.get('project_id')).first()
+    if project is None:
+        return utf8_json({'ok': False, 'error': '未找到可生成标书的项目。'}, status=404)
+    company = project.company
+    report = getattr(project, 'analysis_report', None)
+    raw = report.raw_report if report and isinstance(report.raw_report, dict) else {}
+    technical = [
+        {'title': '项目理解', 'status': 'generated', 'summary': report.summary if report else f'围绕{project.name}梳理建设目标、范围与关键需求。'},
+        {'title': '技术路线', 'status': 'generated', 'summary': f'结合{project.project_type or "项目特点"}规划总体架构、数据体系与安全方案。'},
+        {'title': '实施方案', 'status': 'generated', 'summary': '按启动、调研、设计、开发、测试、上线和验收划分实施阶段。'},
+        {'title': '服务与运维方案', 'status': 'generated', 'summary': '建立响应机制、服务等级、巡检计划与持续优化流程。'},
+    ]
+    commercial = [
+        {'title': '公司介绍', 'status': 'generated' if company else 'missing'},
+        {'title': '业绩证明', 'status': 'generated' if company and company.experiences.exists() else 'missing'},
+        {'title': '人员配置', 'status': 'review'},
+        {'title': '资质证明', 'status': 'generated' if company and company.qualifications.exists() else 'missing'},
+    ]
+    checks = []
+    if not project.deadline: checks.append({'type': '缺项', 'message': '投标截止时间尚未识别'})
+    if not company or not company.qualifications.exists(): checks.append({'type': '缺项', 'message': '企业资质材料不足'})
+    for risk in (report.risks[:3] if report else []): checks.append({'type': '风险', 'message': str(risk)})
+    checks.extend({'type': '检查', 'message': message} for message in raw.get('missing_materials', [])[:3])
+    if not checks: checks.append({'type': '通过', 'message': '当前大纲未发现明显缺项，终稿仍需人工审核'})
+    return utf8_json({'ok': True, 'project_name': project.name, 'technical_bid': technical, 'commercial_bid': commercial, 'checks': checks}, json_dumps_params={'ensure_ascii': False})
+
+
+@require_http_methods(['POST'])
+def run_agent_team(request):
+    auth_error = _authentication_error(request)
+    if auth_error:
+        return auth_error
+    payload = _load_json_payload(request)
+    if isinstance(payload, JsonResponse):
+        return payload
+    project = _projects_for_request(request).select_related('company', 'analysis_report').filter(id=payload.get('project_id')).first()
+    if project is None:
+        return utf8_json({'ok': False, 'error': '请选择一个已分析项目。'}, status=404)
+    report = getattr(project, 'analysis_report', None)
+    company = project.company
+    risks = report.risks if report else []
+    high_risks = [risk for risk in risks if str(risk.get('level') if isinstance(risk, dict) else '') in {'高', 'high'}]
+    budget = float(project.budget_amount or 0)
+    price_low, price_high = round(budget * .88), round(budget * .94)
+    agents = [
+        {'key': 'manager', 'name': '项目经理 Agent', 'role': '整体策略', 'status': 'completed', 'output': f'综合匹配度 {report.match_score if report else 0} 分，建议：{report.get_decision_display() if report else "先完成项目评估"}。优先围绕评分点、资源投入和截止时间建立投标计划。'},
+        {'key': 'technical', 'name': '技术专家 Agent', 'role': '技术方案', 'status': 'completed', 'output': f'建议以“{project.project_type or "业务需求"} + 数据治理 + 安全运维”为技术主线，采用分阶段实施与可验收成果设计。'},
+        {'key': 'commercial', 'name': '商务专家 Agent', 'role': '商务文件', 'status': 'completed', 'output': f'已核验企业档案：{company.qualifications.count() if company else 0} 项资质、{company.experiences.count() if company else 0} 项历史业绩。需重点补齐授权、人员和有效期材料。'},
+        {'key': 'pricing', 'name': '报价专家 Agent', 'role': '价格策略', 'status': 'completed', 'output': f'结合预算与竞争强度，首轮建议报价区间为 {price_low:,.0f}–{price_high:,.0f} 元；最终报价需结合成本和评分公式复核。' if budget else '项目预算尚未识别，建议先补充预算、成本和价格评分公式。'},
+        {'key': 'review', 'name': '审核专家 Agent', 'role': '风险审核', 'status': 'completed', 'output': f'共识别 {len(risks)} 项风险，其中高风险 {len(high_risks)} 项。提交前必须复核资格条件、签章、偏离表和文件格式。'},
+    ]
+    return utf8_json({'ok': True, 'project_name': project.name, 'agents': agents, 'team_summary': {'decision': report.get_decision_display() if report else '待人工决策', 'score': report.match_score if report else 0, 'next_action': '由项目经理确认团队结论后，进入方案生成与文件审核。'}}, json_dumps_params={'ensure_ascii': False})
+
+
+def _ensure_community_schema():
+    if CommunityArticle._meta.db_table not in connection.introspection.table_names():
+        call_command('migrate', 'tenders', verbosity=0, interactive=False)
+
+
+@require_http_methods(['GET'])
+def community_articles(request):
+    _ensure_community_schema()
+    category = str(request.GET.get('category') or '').strip()
+    queryset = CommunityArticle.objects.all()
+    if category:
+        queryset = queryset.filter(category=category)
+    rows = [{'id': item.id, 'title': item.title, 'category': item.category, 'summary': item.summary, 'read_minutes': item.read_minutes, 'is_featured': item.is_featured, 'published_at': item.published_at.isoformat()} for item in queryset[:30]]
+    categories = list(CommunityArticle.objects.values_list('category', flat=True).distinct().order_by('category'))
+    return _cache_public_library_response(utf8_json({'ok': True, 'articles': rows, 'categories': categories}, json_dumps_params={'ensure_ascii': False}))
+
+
+@require_http_methods(['GET', 'POST'])
+def community_posts(request):
+    _ensure_community_schema()
+    if request.method == 'POST':
+        auth_error = _authentication_error(request)
+        if auth_error:
+            return auth_error
+        payload = _load_json_payload(request)
+        if isinstance(payload, JsonResponse):
+            return payload
+        title = str(payload.get('title') or '').strip()
+        content = str(payload.get('content') or '').strip()
+        category = str(payload.get('category') or '投标技巧').strip()
+        if len(title) < 4 or len(content) < 10:
+            return utf8_json({'ok': False, 'error': '标题至少4个字，内容至少10个字。'}, status=400)
+        post = CommunityPost.objects.create(author=request.user, author_name=request.user.get_full_name() or request.user.username, title=title, category=category, content=content)
+        return utf8_json({'ok': True, 'post': _serialize_community_post(post)}, status=201, json_dumps_params={'ensure_ascii': False})
+    category = str(request.GET.get('category') or '').strip()
+    queryset = CommunityPost.objects.all()
+    if category:
+        queryset = queryset.filter(category=category)
+    return _cache_public_library_response(utf8_json({'ok': True, 'posts': [_serialize_community_post(item) for item in queryset[:40]]}, json_dumps_params={'ensure_ascii': False}))
+
+
+def _serialize_community_post(item):
+    return {'id': item.id, 'title': item.title, 'category': item.category, 'content': item.content, 'author_name': item.author_name, 'view_count': item.view_count, 'reply_count': item.reply_count, 'is_featured': item.is_featured, 'created_at': item.created_at.isoformat()}
 
 
 @require_http_methods(['GET', 'POST'])
 def contracts_collection(request):
     if request.method == 'GET':
-        _ensure_demo_data_available()
-        contracts = [_serialize_contract(item) for item in Contract.objects.all()]
+        _ensure_reference_data_available()
+        queryset = Contract.objects.all()
+        total = queryset.count()
+        try:
+            limit = min(max(int(request.GET.get('limit', 0) or 0), 0), 100)
+        except (TypeError, ValueError):
+            limit = 0
+        if limit:
+            queryset = queryset[:limit]
+        contracts = [_serialize_contract(item) for item in queryset]
         if _prefers_html(request):
-            return HttpResponse(_contracts_page_html(contracts), content_type='text/html; charset=utf-8')
-        return utf8_json(
+            return _cache_public_library_response(
+                HttpResponse(_contracts_page_html(contracts), content_type='text/html; charset=utf-8')
+            )
+        return _cache_public_library_response(utf8_json(
             {
                 'ok': True,
                 'contracts': contracts,
+                'total': total,
             },
             json_dumps_params={'ensure_ascii': False},
-        )
+        ))
 
     if not request.user.is_authenticated:
         return utf8_json({'ok': False, 'error': '请先登录。'}, status=401)
@@ -1258,6 +1560,7 @@ def report_detail(request, report_id):
                 'scoring_breakdown': report_sections['scoring_breakdown'],
                 'review_summary': report_sections['review_summary'],
                 'key_findings': report_sections['key_findings'],
+                'reference_matches': raw_report.get('reference_matches', []),
             },
         },
         json_dumps_params={'ensure_ascii': False},
@@ -1354,6 +1657,12 @@ def analyze_tender_pdf_agent(request):
         return utf8_json({'ok': False, 'error': 'pdf_file 不能为空。'}, status=400)
     if not pdf_file.name.lower().endswith('.pdf'):
         return utf8_json({'ok': False, 'error': '请上传 PDF 文件。'}, status=400)
+    if pdf_file.size > MAX_PDF_UPLOAD_BYTES:
+        return utf8_json({'ok': False, 'error': 'PDF 文件不能超过 50 MB。'}, status=413)
+    header = pdf_file.read(5)
+    pdf_file.seek(0)
+    if header != b'%PDF-':
+        return utf8_json({'ok': False, 'error': '文件内容不是有效的 PDF。'}, status=400)
 
     project = TenderProject.objects.create(
         company=company,
@@ -1485,7 +1794,8 @@ def analyze_tender_blob_agent(request):
         return utf8_json({'ok': False, 'error': 'company_id 不能为空。'}, status=400)
     if analysis_mode is None:
         return utf8_json({'ok': False, 'error': 'analysis_mode 仅支持 rule_based、openai 或 agnes。'}, status=400)
-    if not is_client_blob_path(pathname) or not pathname.lower().endswith('.pdf'):
+    expected_prefix = f'client-tender-documents/company-{company_id}/'
+    if not is_client_blob_path(pathname) or not pathname.startswith(expected_prefix) or not pathname.lower().endswith('.pdf'):
         return utf8_json({'ok': False, 'error': '云端 PDF 路径无效。'}, status=400)
     if not original_name.lower().endswith('.pdf'):
         return utf8_json({'ok': False, 'error': '请上传 PDF 文件。'}, status=400)
@@ -1500,7 +1810,7 @@ def analyze_tender_blob_agent(request):
     except (FileNotFoundError, RuntimeError) as exc:
         return utf8_json({'ok': False, 'error': str(exc)}, status=400)
 
-    if len(pdf_content) > 50 * 1024 * 1024:
+    if len(pdf_content) > MAX_PDF_UPLOAD_BYTES:
         return utf8_json({'ok': False, 'error': 'PDF 文件不能超过 50 MB。'}, status=400)
     if not pdf_content.lstrip().startswith(b'%PDF'):
         return utf8_json({'ok': False, 'error': '云端文件不是有效的 PDF。'}, status=400)
@@ -1589,6 +1899,10 @@ def analyze_tender_blob_agent(request):
 def _company_profile_for_agent(company):
     return {
         'name': company.name,
+        'industry': company.industry,
+        'registered_capital': float(company.registered_capital) if company.registered_capital is not None else None,
+        'employee_scale': company.employee_scale,
+        'capability_tags': company.capability_tags,
         'business_scope': _split_profile_text(company.main_business),
         'qualifications': [item.name for item in company.qualifications.all()],
         'project_experiences': [item.name for item in company.experiences.all()],
@@ -1640,10 +1954,13 @@ def _serialize_project_row(project):
     tasks = list(project.tasks.all()) if hasattr(project, 'tasks') else []
     pending_tasks = [task for task in tasks if task.status == ProjectTask.Status.PENDING]
     overdue_tasks = [task for task in pending_tasks if task.due_at and task.due_at < timezone.now()]
+    raw_report = report.raw_report if report and isinstance(report.raw_report, dict) else {}
+    issuing_organization = raw_report.get('issuing_organization') or raw_report.get('procurer') or raw_report.get('purchaser') or ''
     return {
         'id': project.id,
         'name': project.name,
         'company_name': project.company.name if project.company else '-',
+        'issuing_organization': issuing_organization,
         'procurement_method': project.procurement_method,
         'project_type': project.project_type,
         'region': project.region,
@@ -1769,7 +2086,7 @@ def _reference_tenders_html(references):
         tags = ' / '.join(item.get('tags') or []) or '-'
         source_text = escape(item.get('source_text') or '-').replace('\n', '<br>')
         rows.append(
-            '<article class="reference-card">'
+            f'<article id="reference-{item.get("id")}" class="reference-card">'
             f'<div class="reference-card__top"><h2>{escape(item.get("title") or "-")}</h2><span>{escape(item.get("project_type") or "-")}</span></div>'
             f'<p class="reference-card__meta">{escape(item.get("industry") or "-")} · {escape(item.get("region") or "-")} · {escape(item.get("issuing_organization") or "-")}</p>'
             f'<p><strong>摘要：</strong>{escape(item.get("summary") or "-")}</p>'

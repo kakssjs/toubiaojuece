@@ -35,3 +35,17 @@ class PasswordChangeRequiredMiddleware:
                 content_type='application/json; charset=utf-8',
             )
         return self.get_response(request)
+
+
+class SecurityHeadersMiddleware:
+    """Add browser protections that are safe for the SPA and Django admin."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        response.setdefault('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+        response.setdefault('X-Permitted-Cross-Domain-Policies', 'none')
+        response.setdefault('Cross-Origin-Resource-Policy', 'same-origin')
+        return response

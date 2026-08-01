@@ -266,29 +266,166 @@ CONTRACT_TEMPLATES = [
 ]
 
 
+# Additional industry coverage. Together with the curated templates above this
+# produces 55 managed reference tenders and 56 managed contract templates.
+# Historical migrations contribute a few original rows, keeping the visible
+# database catalogue within the requested 50-60 range without deleting data.
+# catalogue data-driven makes it easy to review and extend without duplicating
+# large blocks of boilerplate tender text.
+ADDITIONAL_REFERENCE_BLUEPRINTS = [
+    ("政务数据共享交换平台", "政务信息化", "数字政府", "北京", "政务服务和大数据管理局", 760, "数据共享、接口治理、目录管理"),
+    ("城市一网统管指挥平台", "智慧城市", "城市治理", "上海", "城市运行管理中心", 1380, "一网统管、事件处置、指挥调度"),
+    ("基层社会治理网格化平台", "软件信息化", "社会治理", "浙江", "社会治理中心", 520, "网格治理、移动巡查、事件闭环"),
+    ("行政审批电子证照系统", "软件信息化", "数字政府", "福建", "行政审批服务局", 410, "电子证照、电子签章、数据共享"),
+    ("政务热线智能客服平台", "人工智能", "政务服务", "四川", "政务服务热线中心", 360, "智能客服、知识库、工单分析"),
+    ("全民健康信息平台升级", "医疗信息化", "智慧医疗", "江苏", "卫生健康委员会", 980, "健康档案、互联互通、数据治理"),
+    ("医院电子病历五级改造", "医疗信息化", "智慧医疗", "山东", "三级综合医院", 680, "电子病历、临床决策、互联互通"),
+    ("区域医学影像云平台", "云平台建设", "智慧医疗", "河南", "区域卫生健康中心", 860, "影像云、PACS、远程诊断"),
+    ("医保智能审核系统", "人工智能", "医疗保障", "安徽", "医疗保障局", 590, "智能审核、规则引擎、基金监管"),
+    ("智慧校园综合服务平台", "软件信息化", "教育信息化", "湖北", "高等院校", 450, "智慧校园、统一门户、数据中台"),
+    ("职业院校实训室建设", "设备集成", "职业教育", "湖南", "职业技术学院", 720, "实训设备、教学平台、系统集成"),
+    ("中小学教育专网改造", "网络集成", "教育信息化", "广东", "教育局", 630, "教育专网、网络安全、运维"),
+    ("高校科研数据管理平台", "软件信息化", "高等教育", "陕西", "综合大学", 390, "科研管理、数据治理、成果管理"),
+    ("智能工厂MES系统建设", "工业互联网", "智能制造", "重庆", "制造企业", 880, "MES、生产追溯、设备联网"),
+    ("工业设备预测性维护平台", "人工智能", "智能制造", "辽宁", "装备制造企业", 640, "设备监测、故障预测、工业AI"),
+    ("制造企业ERP升级改造", "软件信息化", "企业数字化", "广东", "制造企业", 750, "ERP、供应链、财务集成"),
+    ("工业园区能耗管理平台", "物联网平台", "节能管理", "山东", "工业园区管委会", 480, "能耗监测、节能分析、物联网"),
+    ("新能源场站智能运维平台", "物联网平台", "新能源", "甘肃", "新能源企业", 920, "新能源、智能运维、设备监测"),
+    ("电力调度数据平台", "数据平台", "能源电力", "内蒙古", "电力企业", 1260, "电力调度、数据中台、安全生产"),
+    ("燃气管网安全监测系统", "物联网平台", "城市燃气", "河北", "燃气集团", 570, "燃气监测、泄漏预警、GIS"),
+    ("智慧矿山安全监管平台", "工业互联网", "矿山安全", "山西", "能源集团", 1180, "智慧矿山、安全监管、视频AI"),
+    ("高速公路机电系统升级", "设备集成", "智慧交通", "江西", "高速公路运营公司", 1560, "高速公路、机电系统、收费监控"),
+    ("城市公交智能调度平台", "软件信息化", "智慧交通", "广西", "公共交通集团", 690, "公交调度、车辆定位、客流分析"),
+    ("轨道交通综合监控系统", "系统集成", "轨道交通", "天津", "轨道交通集团", 1880, "轨道交通、综合监控、应急联动"),
+    ("港口物流数字化平台", "软件信息化", "智慧港口", "浙江", "港口集团", 1320, "港口物流、智能调度、物联网"),
+    ("银行数据治理平台", "数据平台", "金融科技", "北京", "商业银行", 980, "数据治理、监管报送、数据质量"),
+    ("金融机构灾备中心建设", "云平台建设", "金融科技", "上海", "金融机构", 1680, "灾备中心、业务连续性、容灾演练"),
+    ("保险智能理赔系统", "人工智能", "保险科技", "深圳", "保险公司", 780, "智能理赔、OCR、反欺诈"),
+    ("证券统一身份认证平台", "网络安全", "金融科技", "广东", "证券公司", 460, "身份认证、零信任、权限治理"),
+    ("农业农村大数据平台", "数据平台", "数字农业", "黑龙江", "农业农村厅", 820, "农业数据、产业分析、数据治理"),
+    ("高标准农田监测系统", "物联网平台", "数字农业", "河南", "农业农村局", 540, "农田监测、遥感、物联网"),
+    ("农产品质量追溯平台", "软件信息化", "食品安全", "云南", "市场监督管理局", 430, "质量追溯、二维码、监管分析"),
+    ("智慧文旅综合服务平台", "软件信息化", "文化旅游", "贵州", "文化和旅游局", 660, "智慧文旅、游客服务、营销分析"),
+    ("博物馆数字化保护项目", "数字化加工", "文化遗产", "陕西", "博物馆", 510, "文物数字化、三维采集、数字资产"),
+    ("景区智慧票务系统", "软件信息化", "文化旅游", "海南", "旅游景区", 350, "智慧票务、客流监测、支付对账"),
+    ("国有企业档案数字化项目", "数字化加工", "档案管理", "北京", "国有企业", 420, "档案扫描、OCR、数据质检"),
+    ("自然资源国土空间基础平台", "GIS平台", "自然资源", "四川", "自然资源厅", 1150, "国土空间、GIS、数据治理"),
+    ("生态环境监测数据平台", "数据平台", "生态环保", "江苏", "生态环境厅", 890, "环境监测、数据分析、预警"),
+    ("河湖长制信息管理平台", "软件信息化", "水利治理", "湖北", "水利厅", 560, "河湖治理、移动巡查、GIS"),
+    ("城市排水防涝监测平台", "物联网平台", "城市治理", "福建", "住房和城乡建设局", 730, "排水防涝、监测预警、应急调度"),
+    ("应急管理综合指挥平台", "智慧城市", "应急管理", "湖南", "应急管理厅", 1480, "应急指挥、融合通信、预案管理"),
+    ("消防物联网远程监控平台", "物联网平台", "消防安全", "浙江", "消防救援支队", 620, "消防物联网、远程监控、告警联动"),
+    ("企业安全生产风险管控平台", "软件信息化", "安全生产", "山东", "应急管理局", 580, "双重预防、隐患排查、安全生产"),
+    ("数据中心基础设施运维服务", "运维服务", "信息技术服务", "广东", "政务数据中心", 680, "数据中心、驻场运维、SLA"),
+    ("桌面终端与网络运维服务", "运维服务", "信息技术服务", "江苏", "事业单位", 320, "桌面运维、网络运维、服务台"),
+]
+
+
+def _build_additional_templates():
+    references = []
+    contracts = []
+    for index, (name, project_type, industry, region, organization, budget, tags) in enumerate(
+        ADDITIONAL_REFERENCE_BLUEPRINTS, start=1
+    ):
+        title = f"{name}参考标书"
+        reference_points = (
+            f"重点核验{tags.replace('、', '、')}相关能力、项目负责人经验、同类业绩、实施计划、"
+            "数据安全、验收指标、售后服务和关键人员稳定性。"
+        )
+        source_text = (
+            f"第一章 招标公告：{name}，预算约{budget}万元，采购方式为公开招标。\n"
+            f"第二章 投标人须知：投标人应具备{industry}领域履约能力及近三年类似项目业绩。\n"
+            f"第三章 技术需求：建设范围包括{tags}，要求提供完整架构、实施与迁移方案。\n"
+            "第四章 商务要求：明确工期、付款节点、人员投入、知识产权、保密和质保责任。\n"
+            "第五章 评分办法：技术方案40分，团队与业绩20分，服务保障10分，报价30分。\n"
+            "第六章 验收要求：按功能、性能、安全、数据质量和用户培训成果分阶段验收。"
+        )
+        references.append({
+            "title": title,
+            "project_type": project_type,
+            "industry": industry,
+            "region": region,
+            "issuing_organization": f"某{organization}",
+            "budget_amount": budget * 10000,
+            "summary": f"适用于{name}及同类{industry}项目的资格、技术、商务和评分条款参考。",
+            "reference_points": reference_points,
+            "source_text": source_text,
+            "tags": tags,
+        })
+        contracts.append({
+            "basic_info": f"{name}\n项目类型：{project_type}\n行业：{industry}\n地区：{region}\n预算：{budget}万元",
+            "tender_content": source_text,
+            "reference_points": reference_points,
+            "scoring_rules": "技术方案40分；团队配置10分；同类业绩10分；服务保障10分；投标报价30分。",
+            "risk_tags": "资格条件偏离风险\n关键技术参数偏离风险\n工期与人员投入风险\n数据安全与验收风险\n付款及质保责任风险",
+            "material_checklist": "营业执照\n资质与体系证书\n项目负责人简历及证明\n同类项目合同与验收证明\n技术实施方案\n服务与质保承诺\n报价明细表",
+            "source_maintenance_info": f"来源：策标行业参考模板库\n模板编号：CB-{index + 15:03d}\n适用：{industry}/{project_type}",
+        })
+    return references, contracts
+
+
+_ADDITIONAL_REFERENCES, _ADDITIONAL_CONTRACTS = _build_additional_templates()
+REFERENCE_TEMPLATES.extend(_ADDITIONAL_REFERENCES)
+CONTRACT_TEMPLATES.extend(_ADDITIONAL_CONTRACTS[:41])
+
+
 class Command(BaseCommand):
     help = "Seed reusable tender reference templates and contract-style bid templates."
 
     def handle(self, *args, **options):
-        reference_count = 0
-        contract_count = 0
-
+        reference_fields = [
+            "project_type", "industry", "region", "issuing_organization", "budget_amount",
+            "published_at", "summary", "reference_points", "source_text", "tags", "is_featured",
+        ]
+        existing_references = {
+            item.title: item
+            for item in TenderReference.objects.filter(
+                title__in=[template["title"] for template in REFERENCE_TEMPLATES]
+            )
+        }
+        references_to_create = []
+        references_to_update = []
         for index, template in enumerate(REFERENCE_TEMPLATES, start=1):
-            TenderReference.objects.update_or_create(
-                title=template["title"],
-                defaults={**template, "published_at": None, "is_featured": index <= 10},
-            )
-            reference_count += 1
+            values = {**template, "published_at": None, "is_featured": index <= 10}
+            reference = existing_references.get(template["title"])
+            if reference is None:
+                references_to_create.append(TenderReference(**values))
+                continue
+            for field in reference_fields:
+                setattr(reference, field, values[field])
+            references_to_update.append(reference)
 
-        for template in CONTRACT_TEMPLATES:
-            Contract.objects.update_or_create(
-                basic_info=template["basic_info"],
-                defaults=template,
+        TenderReference.objects.bulk_create(references_to_create, batch_size=100)
+        if references_to_update:
+            TenderReference.objects.bulk_update(references_to_update, reference_fields, batch_size=100)
+
+        contract_fields = [
+            "tender_content", "reference_points", "scoring_rules", "risk_tags",
+            "material_checklist", "source_maintenance_info",
+        ]
+        existing_contracts = {
+            item.basic_info: item
+            for item in Contract.objects.filter(
+                basic_info__in=[template["basic_info"] for template in CONTRACT_TEMPLATES]
             )
-            contract_count += 1
+        }
+        contracts_to_create = []
+        contracts_to_update = []
+        for template in CONTRACT_TEMPLATES:
+            contract = existing_contracts.get(template["basic_info"])
+            if contract is None:
+                contracts_to_create.append(Contract(**template))
+                continue
+            for field in contract_fields:
+                setattr(contract, field, template[field])
+            contracts_to_update.append(contract)
+
+        Contract.objects.bulk_create(contracts_to_create, batch_size=100)
+        if contracts_to_update:
+            Contract.objects.bulk_update(contracts_to_update, contract_fields, batch_size=100)
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Seeded {reference_count} tender references and {contract_count} contract templates."
+                f"Seeded {len(REFERENCE_TEMPLATES)} tender references and {len(CONTRACT_TEMPLATES)} contract templates."
             )
         )
