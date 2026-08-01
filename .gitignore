@@ -9,6 +9,8 @@ db.sqlite3
 logs/
 tmp/
 tmp-test-media/
+media/
+project-media/
 
 frontend/node_modules/
 frontend/dist/

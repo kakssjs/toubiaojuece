@@ -1,6 +1,6 @@
 ﻿<template>
   <main class="site-shell">
-    <header v-if="currentPage !== 'home'" class="site-header" :class="{ 'registration-header': currentPage === 'register' }">
+    <header v-if="currentPage !== 'workspace'" class="site-header" :class="{ 'registration-header': currentPage === 'register' }">
       <a class="brand" href="/" aria-label="策标首页">
         <img class="brand-symbol" :src="brandMark" alt="" />
         <span class="brand-text">策标</span>
@@ -28,7 +28,7 @@
         <div class="notification-panel">
           <div class="notification-panel-head">
             <strong>任务提醒</strong>
-            <span>邮件/企微待配置</span>
+            <span>当前提醒方式：站内通知</span>
           </div>
           <article v-for="item in notificationState.items" :key="item.id" :class="{ unread: item.reminder_unread }">
             <a :href="`/projects/${item.project_id}/`">
@@ -44,13 +44,7 @@
       <button type="button" @click="logoutUploads">退出登录</button>
     </div>
 
-    <section v-if="requiresWorkspaceAuth && authState.loading" class="page-section workspace-auth-gate">
-      <div class="loading-panel">
-        <p class="section-kicker">Secure Workspace</p>
-        <h1>正在确认登录状态</h1>
-        <p>正在安全连接你的企业工作台...</p>
-      </div>
-    </section>
+    <template v-if="requiresWorkspaceAuth && authState.loading"></template>
 
     <section v-else-if="requiresWorkspaceAuth && !authState.authenticated" class="page-section workspace-auth-gate">
       <div class="workspace-auth-panel">
@@ -139,7 +133,7 @@
           <div class="registration-card-head">
             <p>创建企业账号</p>
             <h2>开启你的策标工作台</h2>
-            <span>已有账号？<a href="/">返回登录</a></span>
+            <span>已有账号？<a href="/workspace/">返回登录</a></span>
           </div>
           <form class="registration-form" @submit.prevent="registerAccount">
             <div class="registration-field-grid">
@@ -188,15 +182,10 @@
       </div>
     </section>
 
-    <section v-else-if="currentPage === 'home'">
-      <div v-if="workspaceLoading" class="page-section">
-        <div class="loading-panel">
-          <p class="section-kicker">Workspace</p>
-          <h1>工作台加载中</h1>
-          <p>正在聚合项目池、企业档案和风险提醒...</p>
-        </div>
-      </div>
-      <div v-else-if="workspaceState.error" class="page-section">
+    <PublicHome v-else-if="currentPage === 'home'" />
+
+    <section v-else-if="currentPage === 'workspace'">
+      <div v-if="workspaceState.error" class="page-section">
         <div class="loading-panel loading-panel-error">
           <p class="section-kicker">Workspace</p>
           <h1>工作台暂时无法打开</h1>
@@ -212,26 +201,37 @@
           :nav-items="workspaceNavItems"
           :current-page="currentPage"
           :company-name="companyForm.name"
+          :company-profile="companyForm"
           :profile-completeness="profileCompletion"
           :metrics="workspaceMetrics"
           :projects="workspaceProjects"
+          :all-projects="projectState.projects"
+          :csrf-token="authState.csrfToken"
+          :historical-cases="historicalBidState.cases"
+          :historical-industries="historicalBidState.industries"
+          :historical-total="historicalBidState.total"
+          :historical-loading="historicalBidState.loading"
+          :historical-error="historicalBidState.error"
           :reminders="workspaceReminders"
+          :notifications="notificationState.items"
+          :notification-unread-count="notificationState.unreadCount"
+          :mark-notification-read="markNotificationRead"
+          :task-reminder-label="taskReminderLabel"
           :decision-class="decisionClass"
           :risk-class="riskClass"
         />
 
-        <section class="home-contract-library">
+        <section v-if="false" class="home-contract-library">
           <div class="home-contract-head">
             <div>
               <p class="section-kicker">Reference Library</p>
               <h2>合同标书参考库</h2>
-              <p>恢复原主站的合同与标书参考样本，直接读取线上数据库中的真实资料。</p>
+              <p>已收录 {{ contractState.total || '多行业' }} 份合同与标书参考样本，可查看资格、评分、风险和材料清单。</p>
             </div>
             <a class="button-primary" href="/contracts/">进入合同库</a>
           </div>
 
-          <div v-if="contractState.loading" class="contract-library-status">合同标书加载中...</div>
-          <div v-else-if="contractState.error" class="contract-library-status error">{{ contractState.error }}</div>
+          <div v-if="contractState.error" class="contract-library-status error">{{ contractState.error }}</div>
           <div v-else class="home-contract-grid">
             <article v-for="contract in homeContracts" :key="contract.id" class="home-contract-card">
               <div class="contract-card-top">
@@ -304,6 +304,8 @@
       </template>
     </section>
 
+    <CommunityHub v-else-if="currentPage === 'community'" :authenticated="authState.authenticated" :csrf-token="authState.csrfToken" />
+
     <section v-else-if="currentPage === 'product'" class="page-section content-page product-page">
       <div class="page-heading">
         <p class="section-kicker">Product Features</p>
@@ -365,7 +367,7 @@
         <div class="system-panel">
           <div>
             <p class="section-kicker">System Fit</p>
-            <h2>既能作为独立工具，也能融入企业已有投标流程</h2>
+            <h2>适配不同规模与分工方式的投标团队</h2>
           </div>
           <div class="system-columns">
             <article v-for="item in systemFits" :key="item.title">
@@ -873,8 +875,7 @@
           <p class="section-kicker">Recent Analyses</p>
           <h2>最近分析项目</h2>
         </div>
-        <div v-if="agentState.recentLoading" class="recent-empty">最近项目加载中...</div>
-        <div v-else-if="agentState.recentError" class="recent-empty">{{ agentState.recentError }}</div>
+        <div v-if="agentState.recentError" class="recent-empty">{{ agentState.recentError }}</div>
         <div v-else class="recent-projects">
           <article v-for="project in agentState.recentProjects" :key="project.id">
             <div>
@@ -907,18 +908,14 @@
         </p>
       </div>
 
-      <div v-if="projectState.loading" class="loading-panel">
-        <p class="section-kicker">Projects</p>
-        <h1>项目看板加载中</h1>
-      </div>
-
-      <div v-else-if="projectState.error" class="loading-panel">
+      <div v-if="projectState.error" class="loading-panel">
         <p class="section-kicker">Projects</p>
         <h1>项目看板无法打开</h1>
         <p>{{ projectState.error }}</p>
       </div>
 
       <template v-else>
+        <ProjectManagementCenter :projects="projectState.projects" />
         <div class="project-summary">
           <article>
             <span>项目总数</span>
@@ -1020,12 +1017,7 @@
     </section>
 
     <section v-else-if="currentPage === 'projectDetail'" class="page-section content-page project-detail-page">
-      <div v-if="projectDetailState.loading" class="loading-panel">
-        <p class="section-kicker">Project Workspace</p>
-        <h1>项目详情加载中</h1>
-      </div>
-
-      <div v-else-if="projectDetailState.error" class="loading-panel">
+      <div v-if="projectDetailState.error" class="loading-panel">
         <p class="section-kicker">Project Workspace</p>
         <h1>项目详情无法打开</h1>
         <p>{{ projectDetailState.error }}</p>
@@ -1315,12 +1307,7 @@
         </p>
       </div>
 
-      <div v-if="companyState.loading" class="loading-panel">
-        <p class="section-kicker">Profile</p>
-        <h1>企业档案加载中</h1>
-      </div>
-
-      <div v-else class="company-workbench">
+      <div class="company-workbench">
         <form class="company-form" @submit.prevent="saveCompanyProfile">
           <section class="company-form-section">
             <div class="form-section-title">
@@ -1332,10 +1319,14 @@
                 <span>企业名称</span>
                 <input v-model="companyForm.name" type="text" placeholder="例如：小苏科技" />
               </label>
+              <label><span>所属行业</span><input v-model="companyForm.industry" type="text" placeholder="例如：软件和信息技术服务" /></label>
+              <label><span>注册资金</span><input v-model="companyForm.registered_capital" type="number" min="0" step="10000" placeholder="单位：元" /></label>
+              <label><span>人员规模</span><select v-model="companyForm.employee_scale"><option value="">请选择</option><option>1-20人</option><option>21-50人</option><option>51-100人</option><option>101-300人</option><option>301-1000人</option><option>1000人以上</option></select></label>
               <label>
                 <span>最大可承接金额</span>
                 <input v-model="companyForm.max_project_amount" type="number" min="0" step="10000" placeholder="例如：8000000" />
               </label>
+              <label class="full-field"><span>企业能力标签</span><input v-model="companyForm.capability_tags" type="text" placeholder="例如：智慧城市、数字政府、医疗信息化、数据治理" /></label>
               <label>
                 <span>主营业务</span>
                 <textarea v-model="companyForm.main_business" rows="4" placeholder="例如：AI应用开发、政企信息化系统集成、数据中台建设"></textarea>
@@ -1428,6 +1419,7 @@
         </form>
 
         <aside class="company-summary">
+          <CompanyAiProfile :profile="companyForm" />
           <p class="section-kicker">AI Decision Basis</p>
           <h2>这份档案将成为智能体的判断依据</h2>
           <div class="profile-score">
@@ -1469,9 +1461,7 @@
         <h2>没有管理权限</h2>
         <p>当前账号不是管理员，无法访问账号管理页面。</p>
       </div>
-      <div v-else-if="accountAdminState.loading" class="loading-panel">
-        <h2>账号数据加载中</h2>
-      </div>
+      <template v-else-if="accountAdminState.loading"></template>
       <div v-else class="account-admin-layout">
         <section class="account-admin-section account-create-section">
           <div>
@@ -1529,12 +1519,7 @@
     </section>
 
     <section v-else-if="currentPage === 'report'" class="page-section content-page report-page">
-      <div v-if="reportState.loading" class="loading-panel">
-        <p class="section-kicker">Report</p>
-        <h1>报告加载中</h1>
-      </div>
-
-      <div v-else-if="reportState.error" class="loading-panel">
+      <div v-if="reportState.error" class="loading-panel">
         <p class="section-kicker">Report</p>
         <h1>报告无法打开</h1>
         <p>{{ reportState.error }}</p>
@@ -1652,6 +1637,20 @@
               <ul>
                 <li v-for="item in reportState.detail.key_findings" :key="item">{{ item }}</li>
               </ul>
+            </section>
+
+            <section v-if="reportState.detail.reference_matches?.length" class="report-card wide">
+              <h2>相似参考标书</h2>
+              <div class="reference-match-list">
+                <article v-for="item in reportState.detail.reference_matches" :key="item.id">
+                  <div>
+                    <strong>{{ item.title }}</strong>
+                    <span>{{ item.industry }} · {{ item.project_type }} · {{ item.region }}</span>
+                  </div>
+                  <p>{{ item.reference_points }}</p>
+                  <a :href="`/api/reference-tenders/?format=html#reference-${item.id}`">查看参考标书</a>
+                </article>
+              </div>
             </section>
 
             <section class="report-card">
@@ -1859,6 +1858,10 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { upload } from '@vercel/blob/client'
 import WorkspaceDashboard from './components/workspace/WorkspaceDashboard.vue'
+import ProjectManagementCenter from './components/projects/ProjectManagementCenter.vue'
+import CompanyAiProfile from './components/company/CompanyAiProfile.vue'
+import CommunityHub from './components/community/CommunityHub.vue'
+import PublicHome from './components/marketing/PublicHome.vue'
 import {
   demoCompany,
   demoProjects,
@@ -1871,13 +1874,16 @@ import {
   rankWorkspaceProjects,
 } from './workspace/dashboard-data.js'
 import { listContracts } from './api/contracts.js'
+import { listHistoricalBidCases } from './api/historical-bids.js'
 
 const routeMap = {
   '/': 'home',
+  '/workspace/': 'workspace',
   '/product/': 'product',
   '/solutions/': 'solutions',
   '/process/': 'process',
   '/scenes/': 'scenes',
+  '/community/': 'community',
   '/agent/': 'agent',
   '/company/': 'company',
   '/accounts/': 'accounts',
@@ -1887,28 +1893,44 @@ const routeMap = {
 
 const brandMark = `${import.meta.env.BASE_URL}brand-mark-color.png`
 
-const privateWorkspacePages = new Set(['home', 'company', 'accounts', 'projects', 'projectDetail', 'report'])
+const privateWorkspacePages = new Set(['workspace', 'company', 'accounts', 'projects', 'projectDetail', 'report'])
 
 const githubPagesBase =
   window.location.hostname.endsWith('github.io')
     ? `/${window.location.pathname.split('/').filter(Boolean)[0] || ''}`
     : ''
-const appPathname =
-  githubPagesBase && window.location.pathname.startsWith(githubPagesBase)
-    ? window.location.pathname.slice(githubPagesBase.length) || '/'
-    : window.location.pathname
-const normalizedPath = appPathname.endsWith('/') ? appPathname : `${appPathname}/`
-
-const reportMatch = normalizedPath.match(/^\/reports\/(\d+)\/$/)
-const projectMatch = normalizedPath.match(/^\/projects\/(\d+)\/$/)
-const currentPage = reportMatch ? 'report' : projectMatch ? 'projectDetail' : routeMap[normalizedPath] || 'home'
-const requiresWorkspaceAuth = computed(() => privateWorkspacePages.has(currentPage) && !isStaticShowcase)
-const currentReportId = reportMatch ? reportMatch[1] : null
-const currentProjectId = projectMatch ? projectMatch[1] : null
 const isStaticShowcase =
   window.location.protocol === 'file:' ||
   window.location.hostname.endsWith('github.io') ||
   new URLSearchParams(window.location.search).has('showcase')
+
+function resolveAppRoute(pathname = window.location.pathname) {
+  const appPathname =
+    githubPagesBase && pathname.startsWith(githubPagesBase)
+      ? pathname.slice(githubPagesBase.length) || '/'
+      : pathname
+  const normalizedPath = appPathname.endsWith('/') ? appPathname : `${appPathname}/`
+  const reportMatch = normalizedPath.match(/^\/reports\/(\d+)\/$/)
+  const projectMatch = normalizedPath.match(/^\/projects\/(\d+)\/$/)
+  const page = reportMatch ? 'report' : projectMatch ? 'projectDetail' : routeMap[normalizedPath]
+
+  if (!page) return null
+  return {
+    page,
+    reportId: reportMatch?.[1] || null,
+    projectId: projectMatch?.[1] || null,
+  }
+}
+
+const initialRoute = resolveAppRoute() || { page: 'home', reportId: null, projectId: null }
+const currentPage = ref(initialRoute.page)
+const currentReportId = ref(initialRoute.reportId)
+const currentProjectId = ref(initialRoute.projectId)
+const requiresWorkspaceAuth = computed(
+  () => privateWorkspacePages.has(currentPage.value) && !isStaticShowcase,
+)
+const pageLoadedAt = new Map()
+const PAGE_CACHE_TTL = 30_000
 
 function setupStaticShowcaseNavigation() {
   if (!isStaticShowcase || !githubPagesBase) {
@@ -1929,19 +1951,77 @@ function setupStaticShowcaseNavigation() {
   })
 }
 
+function setupAppNavigation() {
+  if (isStaticShowcase) return
+
+  document.addEventListener('click', (event) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return
+    }
+
+    const link = event.target.closest('a')
+    if (!link || link.target || link.hasAttribute('download')) return
+
+    const url = new URL(link.href, window.location.href)
+    if (url.origin !== window.location.origin || !resolveAppRoute(url.pathname)) return
+
+    event.preventDefault()
+    if (`${url.pathname}${url.search}${url.hash}` === `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+
+    window.history.pushState({}, '', url)
+    navigateToCurrentLocation()
+  })
+
+  window.addEventListener('popstate', navigateToCurrentLocation)
+}
+
+async function navigateToCurrentLocation() {
+  const route = resolveAppRoute()
+  if (!route) return
+
+  currentPage.value = route.page
+  currentReportId.value = route.reportId
+  currentProjectId.value = route.projectId
+  window.scrollTo({ top: 0, behavior: 'auto' })
+
+  if (!authState.checked && (requiresWorkspaceAuth.value || currentPage.value === 'agent' || currentPage.value === 'register' || currentPage.value === 'community')) {
+    await loadAuthStatus()
+  }
+
+  if (requiresWorkspaceAuth.value) {
+    if (authState.authenticated && !authState.mustChangePassword) {
+      if (currentPage.value === 'workspace') restoreWorkspaceSnapshot()
+      await loadCurrentPrivatePage()
+    }
+    return
+  }
+
+  if (currentPage.value === 'agent') {
+    await loadSystemStatus()
+    if (authState.authenticated && !authState.mustChangePassword) {
+      await Promise.all([loadCompaniesForAgent(), loadRecentAgentProjects()])
+    }
+  }
+}
+
 const navItems = [
   { key: 'home', label: '首页', href: '/' },
-  { key: 'product', label: '产品功能', href: '/product/' },
+  { key: 'product', label: '产品', href: '/product/' },
   { key: 'solutions', label: '解决方案', href: '/solutions/' },
-  { key: 'process', label: 'AI分析流程', href: '/process/' },
-  { key: 'scenes', label: '应用场景', href: '/scenes/' },
+  { key: 'community', label: '投标学院', href: '/community/' },
+  { key: 'agent', label: '免费体验', href: '/agent/' },
+  { key: 'workspace', label: '进入工作台', href: '/workspace/' },
 ]
 
 const workspaceNavItems = [
-  { key: 'home', label: '经营总览', href: '/' },
+  { key: 'workspace', label: '经营总览', href: '/workspace/' },
   { key: 'agent', label: '智能分析', href: '/agent/' },
   { key: 'projects', label: '机会池', href: '/projects/' },
   { key: 'company', label: '企业档案', href: '/company/' },
+  { key: 'community', label: '投标社区', href: '/community/' },
 ]
 
 const sampleTenderText =
@@ -1971,6 +2051,7 @@ const agentState = reactive({
 })
 const authState = reactive({
   loading: true,
+  checked: false,
   authenticated: false,
   username: '',
   isStaff: false,
@@ -2092,14 +2173,16 @@ const companyState = reactive({
   message: '',
 })
 const workspaceState = reactive({
-  loading: true,
+  loading: false,
   error: '',
 })
 const contractState = reactive({
   loading: false,
   error: '',
   contracts: [],
+  total: 0,
 })
+const historicalBidState = reactive({ loading: false, error: '', cases: [], industries: [], total: 0 })
 const selectedContractId = ref(null)
 const companyForm = reactive(emptyCompanyProfile())
 
@@ -2133,9 +2216,6 @@ const workspaceReminders = computed(() => buildRiskReminders(projectState.projec
 const reportDecisionSummary = computed(() => buildDecisionSummary(reportState.detail))
 const projectDecisionSummary = computed(() =>
   buildDecisionSummary(projectDetailState.detail?.report, projectDetailState.detail?.workspace),
-)
-const workspaceLoading = computed(
-  () => workspaceState.loading || projectState.loading || companyState.loading,
 )
 const systemEngineTitle = computed(() => {
   if (systemState.loading) return '正在检测分析引擎'
@@ -2193,28 +2273,32 @@ const projectNoteTypes = [
 
 onMounted(async () => {
   setupStaticShowcaseNavigation()
+  setupAppNavigation()
 
-  if (isStaticShowcase && privateWorkspacePages.has(currentPage)) {
+  if (isStaticShowcase && privateWorkspacePages.has(currentPage.value)) {
     await loadAuthStatus()
     await loadCurrentPrivatePage()
     return
   }
 
-  if (requiresWorkspaceAuth.value || currentPage === 'agent' || currentPage === 'register') {
+  if (requiresWorkspaceAuth.value || currentPage.value === 'agent' || currentPage.value === 'register' || currentPage.value === 'community') {
     await loadAuthStatus()
   }
 
-  if (currentPage === 'register' && authState.authenticated) {
-    window.location.replace('/')
+  if (currentPage.value === 'register' && authState.authenticated) {
+    window.location.replace('/workspace/')
     return
   }
 
   if (requiresWorkspaceAuth.value) {
-    if (authState.authenticated && !authState.mustChangePassword) await loadCurrentPrivatePage()
+    if (authState.authenticated && !authState.mustChangePassword) {
+      if (currentPage.value === 'workspace') restoreWorkspaceSnapshot()
+      await loadCurrentPrivatePage()
+    }
     return
   }
 
-  if (currentPage === 'agent') {
+  if (currentPage.value === 'agent') {
     await loadSystemStatus()
     if (authState.authenticated && !authState.mustChangePassword) {
       try {
@@ -2227,14 +2311,18 @@ onMounted(async () => {
 })
 
 async function loadCurrentPrivatePage() {
+  const cacheKey = `${currentPage.value}:${currentReportId.value || currentProjectId.value || ''}`
+  if (Date.now() - (pageLoadedAt.get(cacheKey) || 0) < PAGE_CACHE_TTL) return
+
   let pageRequest
-  if (currentPage === 'home') pageRequest = loadWorkspaceDashboard()
-  if (currentPage === 'report') pageRequest = loadReportDetail()
-  if (currentPage === 'projects') pageRequest = loadProjectDashboard()
-  if (currentPage === 'projectDetail') pageRequest = loadProjectDetail()
-  if (currentPage === 'company') pageRequest = loadCompanyProfile()
-  if (currentPage === 'accounts') pageRequest = loadAccountAdministration()
+  if (currentPage.value === 'workspace') pageRequest = loadWorkspaceDashboard()
+  if (currentPage.value === 'report') pageRequest = loadReportDetail()
+  if (currentPage.value === 'projects') pageRequest = loadProjectDashboard()
+  if (currentPage.value === 'projectDetail') pageRequest = loadProjectDetail()
+  if (currentPage.value === 'company') pageRequest = loadCompanyProfile()
+  if (currentPage.value === 'accounts') pageRequest = loadAccountAdministration()
   await Promise.all([pageRequest, loadTaskNotifications()])
+  pageLoadedAt.set(cacheKey, Date.now())
 }
 
 async function loadTaskNotifications() {
@@ -2282,7 +2370,6 @@ function loadStaticShowcaseData() {
 }
 
 async function loadWorkspaceDashboard() {
-  workspaceState.loading = true
   workspaceState.error = ''
 
   try {
@@ -2290,7 +2377,10 @@ async function loadWorkspaceDashboard() {
       loadStaticShowcaseData()
       return
     }
-    await Promise.all([loadProjectDashboard(), loadCompanyProfile(), loadContractsForHome()])
+    void loadContractsForHome()
+    void loadHistoricalBidsForHome()
+    await Promise.all([loadProjectDashboard(), loadCompanyProfile()])
+    saveWorkspaceSnapshot()
   } catch (error) {
     workspaceState.error = error.message || '工作台加载失败'
   } finally {
@@ -2308,8 +2398,11 @@ async function loadContractsForHome() {
       selectedContractId.value = null
       return
     }
-    contractState.contracts = await listContracts()
+    const result = await listContracts({ limit: 6 })
+    contractState.contracts = result.contracts
+    contractState.total = result.total
     selectedContractId.value = contractState.contracts[0]?.id || null
+    if (currentPage.value === 'workspace') saveWorkspaceSnapshot()
   } catch (error) {
     contractState.error = error.message || '合同标书加载失败'
   } finally {
@@ -2341,6 +2434,7 @@ async function loadAuthStatus() {
     authState.authenticated = true
     authState.username = '演示账号'
     authState.loading = false
+    authState.checked = true
     return
   }
 
@@ -2357,6 +2451,62 @@ async function loadAuthStatus() {
     authState.error = '登录状态加载失败，请刷新页面。'
   } finally {
     authState.loading = false
+    authState.checked = true
+  }
+}
+
+async function loadHistoricalBidsForHome() {
+  historicalBidState.loading = true
+  historicalBidState.error = ''
+  try {
+    if (isStaticShowcase) return
+    const result = await listHistoricalBidCases({ limit: 6 })
+    historicalBidState.cases = result.cases || []
+    historicalBidState.industries = result.industries || []
+    historicalBidState.total = Number(result.total || historicalBidState.cases.length)
+  } catch (error) {
+    historicalBidState.error = error.message || '历史项目加载失败'
+  } finally {
+    historicalBidState.loading = false
+  }
+}
+
+const WORKSPACE_SNAPSHOT_TTL = 10 * 60 * 1000
+
+function workspaceSnapshotKey() {
+  return `cebiaospace:workspace:${authState.username || 'current'}`
+}
+
+function restoreWorkspaceSnapshot() {
+  try {
+    const snapshot = JSON.parse(sessionStorage.getItem(workspaceSnapshotKey()) || 'null')
+    if (!snapshot || Date.now() - snapshot.savedAt > WORKSPACE_SNAPSHOT_TTL) return
+    projectState.projects = Array.isArray(snapshot.projects) ? snapshot.projects : []
+    projectState.summary = snapshot.summary || {}
+    contractState.contracts = Array.isArray(snapshot.contracts) ? snapshot.contracts : []
+    contractState.total = Number(snapshot.contractTotal || contractState.contracts.length)
+    Object.assign(companyForm, snapshot.company || {})
+    selectedContractId.value = contractState.contracts[0]?.id || null
+  } catch {
+    sessionStorage.removeItem(workspaceSnapshotKey())
+  }
+}
+
+function saveWorkspaceSnapshot() {
+  try {
+    sessionStorage.setItem(
+      workspaceSnapshotKey(),
+      JSON.stringify({
+        savedAt: Date.now(),
+        projects: projectState.projects,
+        summary: projectState.summary,
+        contracts: contractState.contracts,
+        contractTotal: contractState.total,
+        company: companyForm,
+      }),
+    )
+  } catch {
+    // 浏览器禁用会话存储时仍使用实时数据。
   }
 }
 
@@ -2391,7 +2541,7 @@ async function loginForUploads() {
     }
     if (requiresWorkspaceAuth.value) {
       await loadCurrentPrivatePage()
-    } else if (currentPage === 'agent') {
+    } else if (currentPage.value === 'agent') {
       await Promise.all([loadCompaniesForAgent(), loadRecentAgentProjects()])
     }
   } catch (error) {
@@ -2443,7 +2593,7 @@ async function registerAccount() {
     const payload = await response.json()
     if (!response.ok || !payload.ok) throw new Error(payload.error || '账号创建失败')
     registrationState.message = '账号创建成功，正在进入企业工作台...'
-    window.setTimeout(() => window.location.assign('/'), 500)
+    window.setTimeout(() => window.location.assign('/workspace/'), 500)
   } catch (error) {
     registrationState.error = error.message || '账号创建失败，请稍后重试。'
   } finally {
@@ -2487,7 +2637,7 @@ async function changeCurrentPassword() {
     passwordChangeState.confirmPassword = ''
     if (requiresWorkspaceAuth.value) {
       await loadCurrentPrivatePage()
-    } else if (currentPage === 'agent') {
+    } else if (currentPage.value === 'agent') {
       await Promise.all([loadCompaniesForAgent(), loadRecentAgentProjects()])
     }
   } catch (error) {
@@ -2687,7 +2837,7 @@ async function loadReportDetail() {
       reportState.detail = demoReport
       return
     }
-    const response = await fetch(`/api/reports/${currentReportId}/`)
+    const response = await fetch(`/api/reports/${currentReportId.value}/`)
     const payload = await response.json()
     if (!response.ok || !payload.ok) {
       throw new Error(payload.error || '报告不存在')
@@ -2788,7 +2938,7 @@ async function loadProjectDetail() {
     if (isStaticShowcase) {
       projectDetailState.detail = {
         ok: true,
-        project: normalizeProjectRow(demoProjects.find((item) => String(item.id) === String(currentProjectId)) || demoProjects[0]),
+        project: normalizeProjectRow(demoProjects.find((item) => String(item.id) === String(currentProjectId.value)) || demoProjects[0]),
         report: demoReport,
         notes: [
           {
@@ -2827,7 +2977,7 @@ async function loadProjectDetail() {
       projectDetailState.pendingStatus = projectDetailState.detail.project.status
       return
     }
-    const response = await fetch(`/api/projects/${currentProjectId}/`)
+    const response = await fetch(`/api/projects/${currentProjectId.value}/`)
     const payload = await response.json()
     if (!response.ok || !payload.ok) {
       throw new Error(payload.error || '项目详情加载失败')
@@ -2959,7 +3109,7 @@ async function refreshProjectDetail() {
   if (isStaticShowcase) {
     return
   }
-  const response = await fetch(`/api/projects/${currentProjectId}/`)
+  const response = await fetch(`/api/projects/${currentProjectId.value}/`)
   const payload = await response.json()
   if (!response.ok || !payload.ok) {
     throw new Error(payload.error || '项目详情刷新失败')
@@ -3055,6 +3205,10 @@ function emptyCompanyProfile() {
   return {
     id: null,
     name: '',
+    industry: '',
+    registered_capital: '',
+    employee_scale: '',
+    capability_tags: '',
     main_business: '',
     service_regions: '',
     max_project_amount: '',
@@ -3088,6 +3242,10 @@ function applyCompanyProfile(profile) {
   const source = profile || emptyCompanyProfile()
   companyForm.id = source.id || null
   companyForm.name = source.name || ''
+  companyForm.industry = source.industry || ''
+  companyForm.registered_capital = source.registered_capital ?? ''
+  companyForm.employee_scale = source.employee_scale || ''
+  companyForm.capability_tags = source.capability_tags || ''
   companyForm.main_business = source.main_business || ''
   companyForm.service_regions = source.service_regions || ''
   companyForm.max_project_amount = source.max_project_amount ?? ''
@@ -3511,7 +3669,7 @@ async function runPdfAnalysis() {
     let response
     if (agentForm.pdfFile.size > 4 * 1024 * 1024) {
       agentState.uploadStage = '正在上传到私有云存储'
-      const blob = await upload(buildClientPdfPath(agentForm.pdfFile.name), agentForm.pdfFile, {
+      const blob = await upload(buildClientPdfPath(agentForm.pdfFile.name, agentForm.companyId), agentForm.pdfFile, {
         access: 'private',
         handleUploadUrl: '/api/blob-upload',
         clientPayload: JSON.stringify({ companyId: agentForm.companyId }),
@@ -3564,9 +3722,9 @@ async function runPdfAnalysis() {
   }
 }
 
-function buildClientPdfPath(fileName) {
+function buildClientPdfPath(fileName, companyId) {
   const stem = fileName.replace(/\.pdf$/i, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
-  return `client-tender-documents/${Date.now()}-${stem || 'tender'}.pdf`
+  return `client-tender-documents/company-${companyId}/${Date.now()}-${stem || 'tender'}.pdf`
 }
 
 const features = [

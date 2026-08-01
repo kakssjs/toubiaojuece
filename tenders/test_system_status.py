@@ -1,11 +1,16 @@
 from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from tenders.models import CompanyProfile, Contract, TenderProject
 
 
 class SystemStatusApiTests(TestCase):
+    def setUp(self):
+        self.staff = get_user_model().objects.create_user('status-admin', password='test-password', is_staff=True)
+        self.client.force_login(self.staff)
+
     def test_status_does_not_expose_openai_key(self):
         CompanyProfile.objects.create(name='测试企业')
         TenderProject.objects.create(name='测试项目')

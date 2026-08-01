@@ -54,6 +54,10 @@ class PdfParserTests(SimpleTestCase):
 
         self.assertEqual(result['method'], 'openai_vision')
         self.assertEqual(urlopen.call_args.args[0].full_url, 'https://relay.example.com/v1/responses')
+        self.assertEqual(
+            urlopen.call_args.args[0].get_header('User-agent'),
+            'Mozilla/5.0 (compatible; Cebiao/1.0)',
+        )
         self.assertTrue(result['used_vision'])
         self.assertIn('扫描件识别', result['text'])
         request_payload = json.loads(urlopen.call_args.args[0].data.decode('utf-8'))

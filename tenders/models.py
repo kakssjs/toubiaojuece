@@ -33,6 +33,10 @@ class CompanyProfile(models.Model):
         db_index=False,
     )
     name = models.CharField('企业名称', max_length=120)
+    industry = models.CharField('所属行业', max_length=120, blank=True)
+    registered_capital = models.DecimalField('注册资金', max_digits=14, decimal_places=2, null=True, blank=True)
+    employee_scale = models.CharField('人员规模', max_length=80, blank=True)
+    capability_tags = models.CharField('企业能力标签', max_length=500, blank=True)
     main_business = models.TextField('主营业务', blank=True)
     service_regions = models.CharField('服务地区', max_length=255, blank=True)
     max_project_amount = models.DecimalField('可承接最高金额', max_digits=14, decimal_places=2, null=True, blank=True)
@@ -204,6 +208,64 @@ class Contract(models.Model):
 
     def __str__(self):
         return f'Contract #{self.id}'
+
+
+class HistoricalBidCase(models.Model):
+    title = models.CharField('历史项目名称', max_length=220, unique=True)
+    industry = models.CharField('所属行业', max_length=80, db_index=True)
+    region = models.CharField('项目地区', max_length=80, blank=True)
+    year = models.PositiveSmallIntegerField('招标年份', db_index=True)
+    budget_amount = models.DecimalField('项目预算', max_digits=14, decimal_places=2)
+    winning_company = models.CharField('中标单位', max_length=180)
+    participant_count = models.PositiveSmallIntegerField('竞争企业数量', default=0)
+    average_bid_amount = models.DecimalField('平均报价', max_digits=14, decimal_places=2, null=True, blank=True)
+    winning_bid_amount = models.DecimalField('中标金额', max_digits=14, decimal_places=2, null=True, blank=True)
+    summary = models.TextField('项目摘要', blank=True)
+    tags = models.CharField('标签', max_length=255, blank=True)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        verbose_name = '历史招标案例'
+        verbose_name_plural = '历史招标案例'
+        ordering = ['-year', '-budget_amount', '-id']
+
+    def __str__(self):
+        return self.title
+
+
+class CommunityArticle(models.Model):
+    title = models.CharField('文章标题', max_length=220, unique=True)
+    category = models.CharField('内容分类', max_length=60, db_index=True)
+    summary = models.TextField('内容摘要')
+    content = models.TextField('正文内容', blank=True)
+    read_minutes = models.PositiveSmallIntegerField('阅读分钟数', default=5)
+    is_featured = models.BooleanField('重点推荐', default=False)
+    published_at = models.DateTimeField('发布时间', auto_now_add=True)
+
+    class Meta:
+        ordering = ['-is_featured', '-published_at']
+
+    def __str__(self):
+        return self.title
+
+
+class CommunityPost(models.Model):
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='bid_community_posts')
+    author_name = models.CharField('作者显示名', max_length=80)
+    title = models.CharField('帖子标题', max_length=220)
+    category = models.CharField('交流分类', max_length=60, db_index=True)
+    content = models.TextField('帖子内容')
+    view_count = models.PositiveIntegerField('浏览次数', default=0)
+    reply_count = models.PositiveIntegerField('回复数量', default=0)
+    is_featured = models.BooleanField('精华内容', default=False)
+    created_at = models.DateTimeField('发布时间', auto_now_add=True)
+
+    class Meta:
+        ordering = ['-is_featured', '-created_at']
+
+    def __str__(self):
+        return self.title
 
 
 class ProjectNote(models.Model):

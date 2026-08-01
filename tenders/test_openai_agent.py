@@ -107,6 +107,7 @@ class OpenAIHybridAgentTests(SimpleTestCase):
 
         self.assertEqual(report["analysis_engine"], "openai")
         self.assertEqual(urlopen.call_args.args[0].full_url, "https://relay.example.com/v1/responses")
+        self.assertEqual(urlopen.call_args.args[0].get_header("User-agent"), "Mozilla/5.0 (compatible; Cebiao/1.0)")
         self.assertEqual(report["match_score"], 91)
         self.assertEqual(report["review_summary"]["review_level"], "可推进")
         self.assertEqual(report["agent_trace"][-1]["agent"], "OpenAI深度审查Agent")

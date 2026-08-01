@@ -37,13 +37,14 @@ export async function createContract(contract) {
   return payload.contract
 }
 
-export async function listContracts() {
-  const response = await fetch('/api/contracts/', {
+export async function listContracts({ limit = 0 } = {}) {
+  const query = limit ? `?limit=${encodeURIComponent(limit)}` : ''
+  const response = await fetch(`/api/contracts/${query}`, {
     headers: {
       Accept: 'application/json',
     },
   })
 
   const payload = await parseJsonResponse(response)
-  return payload.contracts
+  return { contracts: payload.contracts, total: payload.total ?? payload.contracts.length }
 }

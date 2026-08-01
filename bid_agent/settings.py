@@ -3,6 +3,7 @@ Django settings for bid_agent project.
 """
 
 import os
+import secrets
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -104,8 +105,12 @@ def build_database_config():
 VERCEL_URL = os.getenv("VERCEL_URL", "").strip()
 DEBUG = env_flag("DEBUG", default=not os.getenv("VERCEL"))
 AUTO_SEED_DEMO_DATA = env_flag("AUTO_SEED_DEMO_DATA", default=bool(os.getenv("VERCEL")))
-DATA_ACCESS_CONTROL_ENABLED = env_flag("DATA_ACCESS_CONTROL_ENABLED", default=bool(os.getenv("VERCEL")))
-SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-local-dev-key")
+DATA_ACCESS_CONTROL_ENABLED = True if os.getenv("VERCEL") else env_flag("DATA_ACCESS_CONTROL_ENABLED", default=False)
+SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
+if not SECRET_KEY:
+    if os.getenv("VERCEL"):
+        raise RuntimeError("SECRET_KEY is required when deploying to Vercel.")
+    SECRET_KEY = secrets.token_urlsafe(50)
 
 allowed_hosts = {"127.0.0.1", "localhost"}
 allowed_hosts.update(env_list("ALLOWED_HOSTS"))
@@ -132,11 +137,13 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "django.middleware.gzip.GZipMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "tenders.middleware.PasswordChangeRequiredMiddleware",
+    "tenders.middleware.SecurityHeadersMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -192,6 +199,8 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = Path("/tmp/media") if os.getenv("VERCEL") else BASE_DIR / "media"
 if os.getenv("VERCEL"):
     FILE_UPLOAD_TEMP_DIR = Path("/tmp")
+DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("DATA_UPLOAD_MAX_MEMORY_SIZE", str(2 * 1024 * 1024)))
+FILE_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("FILE_UPLOAD_MAX_MEMORY_SIZE", str(2 * 1024 * 1024)))
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
@@ -207,7 +216,7 @@ X_FRAME_OPTIONS = "SAMEORIGIN"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 SECURE_SSL_REDIRECT = not DEBUG
-SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "3600")) if not DEBUG else 0
+SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000")) if not DEBUG else 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = False
 SECURE_HSTS_PRELOAD = False
 

@@ -5,7 +5,10 @@ from django.utils.html import format_html
 from .models import (
     AnalysisReport,
     CompanyProfile,
+    CommunityArticle,
+    CommunityPost,
     Contract,
+    HistoricalBidCase,
     ProjectExperience,
     ProjectNote,
     Qualification,
@@ -14,6 +17,16 @@ from .models import (
     TenderReference,
     UserSecurityProfile,
 )
+
+admin.site.register(CommunityArticle)
+admin.site.register(CommunityPost)
+
+
+@admin.register(HistoricalBidCase)
+class HistoricalBidCaseAdmin(admin.ModelAdmin):
+    list_display = ('title', 'industry', 'region', 'year', 'budget_amount', 'winning_company', 'participant_count')
+    search_fields = ('title', 'industry', 'region', 'winning_company', 'tags', 'summary')
+    list_filter = ('industry', 'region', 'year')
 
 
 @admin.register(UserSecurityProfile)
